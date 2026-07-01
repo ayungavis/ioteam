@@ -1,9 +1,7 @@
 import { SignJWT, jwtVerify } from "jose";
 import crypto from "crypto";
 
-const secret = new TextEncoder().encode(
-  process.env.SESSION_SECRET ?? "change-me-in-production"
-);
+const secret = new TextEncoder().encode(process.env.SESSION_SECRET);
 
 const EXPIRES_IN = process.env.SESSION_EXPIRES_IN ?? "7d";
 
