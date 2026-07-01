@@ -12,7 +12,7 @@ class User extends Model<InferAttributes<User>, InferCreationAttributes<User>> {
   declare appleUserId: string;
   declare email: string;
   declare fullName: string;
-  declare dateOfBirth: string;
+  declare dateOfBirth: CreationOptional<string | null>;
   declare avatarUrl: CreationOptional<string | null>;
   declare onboardingCompleted: CreationOptional<boolean>;
   declare createdAt: CreationOptional<Date>;
@@ -33,7 +33,7 @@ class User extends Model<InferAttributes<User>, InferCreationAttributes<User>> {
         },
         email: { type: DataTypes.STRING, allowNull: false },
         fullName: { type: DataTypes.STRING, allowNull: false },
-        dateOfBirth: { type: DataTypes.DATEONLY, allowNull: false },
+        dateOfBirth: { type: DataTypes.DATEONLY, allowNull: true },
         avatarUrl: { type: DataTypes.STRING, allowNull: true },
         onboardingCompleted: {
           type: DataTypes.BOOLEAN,

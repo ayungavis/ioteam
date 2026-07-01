@@ -1,12 +1,11 @@
 import { Request, Response, NextFunction } from "express";
+import { tokenService } from "../services/token.service";
 
-// Placeholder: verify session token from Authorization header.
-// Replace with real session lookup against the database.
-export function authenticate(
+export async function authenticate(
   req: Request,
   res: Response,
   next: NextFunction
-): void {
+): Promise<void> {
   const token = req.headers.authorization?.split(" ")[1];
 
   if (!token) {
@@ -14,7 +13,11 @@ export function authenticate(
     return;
   }
 
-  // TODO: validate token and populate req.userId from session record
-  req.userId = ""; // set after session lookup
-  next();
+  try {
+    const { userId } = await tokenService.verify(token);
+    req.userId = userId;
+    next();
+  } catch {
+    res.status(401).json({ success: false, error: "Invalid or expired token" });
+  }
 }
