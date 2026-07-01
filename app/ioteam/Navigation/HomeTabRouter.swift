@@ -8,7 +8,9 @@
 import SwiftUI
 
 public enum AppTab: Hashable { case home, profile }
-public enum HomeNavigationDestination: Hashable { case taskDetail(id: UUID) }
+public enum HomeNavigationDestination: Hashable {
+    case deviceDetail(id: UUID)
+}
 
 @Observable
 public final class HomeTabRouter {

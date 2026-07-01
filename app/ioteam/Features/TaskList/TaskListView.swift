@@ -18,7 +18,7 @@ struct TaskListView: View {
 
     var body: some View {
         List(viewModel.tasks) { task in
-            Button(action: { tabRouter.navigate(to: .taskDetail(id: task.id), in: .home) }) {
+            Button(action: {}) {
                 HStack {
                     Text(task.title).foregroundColor(.primary)
                     Spacer()

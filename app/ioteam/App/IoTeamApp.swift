@@ -16,10 +16,11 @@ struct IoTeamApp: App {
     let repository: TaskRepository
     let getTasksUseCase: GetTasksUseCase
     let appleSignInUseCase: AppleSignInUseCase
+    let deviceRepository: DeviceRepositoryProtocol
 
     init() {
         do {
-            let schema = Schema([SDTaskItem.self])
+            let schema = Schema([SDTaskItem.self, SDDeviceRecord.self])
             let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
             self.sharedContainer = try ModelContainer(for: schema, configurations: [config])
 
@@ -32,6 +33,11 @@ struct IoTeamApp: App {
             self.repository = TaskRepository(modelContainer: sharedContainer, apiClient: networkClient)
             self.getTasksUseCase = GetTasksUseCase(repository: repository)
             self.appleSignInUseCase = AppleSignInUseCase(client: networkClient)
+            self.deviceRepository = DeviceRepository(
+                modelContainer: sharedContainer,
+                apiClient: networkClient,
+                bleClient: BLEDeviceProvisioningClient()
+            )
 
             AppRouter.shared.currentFlow = AppLaunchCoordinator.shared.determineInitialFlow()
         } catch {
@@ -45,6 +51,7 @@ struct IoTeamApp: App {
                 .environment(\.getTasksUseCase, getTasksUseCase)
                 .environment(\.taskRepository, repository)
                 .environment(\.appleSignInUseCase, appleSignInUseCase)
+                .environment(\.deviceRepository, deviceRepository)
         }
     }
 }
@@ -62,6 +69,10 @@ struct AppleSignInUseCaseKey: EnvironmentKey {
     @MainActor static let defaultValue: AppleSignInUseCase = .init(client: FakeAPI())
 }
 
+struct DeviceRepositoryKey: EnvironmentKey {
+    @MainActor static let defaultValue: DeviceRepositoryProtocol = FakeDeviceRepository()
+}
+
 extension EnvironmentValues {
     var getTasksUseCase: GetTasksUseCase {
         get { self[GetTasksUseCaseKey.self] } set { self[GetTasksUseCaseKey.self] = newValue }
@@ -73,6 +84,10 @@ extension EnvironmentValues {
 
     var appleSignInUseCase: AppleSignInUseCase {
         get { self[AppleSignInUseCaseKey.self] } set { self[AppleSignInUseCaseKey.self] = newValue }
+    }
+
+    var deviceRepository: DeviceRepositoryProtocol {
+        get { self[DeviceRepositoryKey.self] } set { self[DeviceRepositoryKey.self] = newValue }
     }
 }
 
@@ -87,5 +102,36 @@ private final class FakeRepository: TaskRepositoryProtocol {
 private final class FakeAPI: APIClientProtocol {
     func request<T: Decodable>(_ endpoint: APIEndpoint) async throws -> T {
         throw NetworkError.invalidURL
+    }
+}
+
+private final class FakeDeviceRepository: DeviceRepositoryProtocol {
+    func getDevices() async throws -> [DeviceSummary] {
+        []
+    }
+
+    func startScanning() -> AsyncStream<DeviceScanSnapshot> {
+        AsyncStream { continuation in
+            continuation.yield(DeviceScanSnapshot(discoveredDevices: [], state: .idle))
+            continuation.finish()
+        }
+    }
+
+    func stopScanning() {}
+
+    func pairDevice(discoveryID: UUID, customName: String) async throws -> DeviceSummary {
+        throw BLEDeviceProvisioningError.deviceNotFound
+    }
+
+    func renameDevice(deviceID: UUID, newName: String) async throws -> DeviceSummary {
+        throw BLEDeviceProvisioningError.deviceNotFound
+    }
+
+    func setDeviceEnabled(deviceID: UUID, isEnabled: Bool) async throws -> DeviceSummary {
+        throw BLEDeviceProvisioningError.deviceNotFound
+    }
+
+    func deleteDevice(deviceID: UUID) async throws {
+        throw BLEDeviceProvisioningError.deviceNotFound
     }
 }
