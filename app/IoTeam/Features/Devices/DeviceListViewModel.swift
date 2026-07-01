@@ -4,26 +4,31 @@ import SwiftUI
 @Observable
 final class DeviceListViewModel {
     var devices: [DeviceSummary] = []
-    var isLoading = false
     var alertMessage: String?
 
-    private let getDevicesUseCase: GetDevicesUseCase
+    private let observeDevicesUseCase: ObserveDevicesUseCase
+    @ObservationIgnored
+    private var observationTask: Task<Void, Never>?
 
-    init(getDevicesUseCase: GetDevicesUseCase) {
-        self.getDevicesUseCase = getDevicesUseCase
+    init(observeDevicesUseCase: ObserveDevicesUseCase) {
+        self.observeDevicesUseCase = observeDevicesUseCase
     }
 
-    @MainActor
-    func loadData() async {
-        isLoading = true
-        alertMessage = nil
+    deinit {
+        observationTask?.cancel()
+    }
 
-        do {
-            devices = try await getDevicesUseCase.execute()
-            isLoading = false
-        } catch {
-            alertMessage = error.localizedDescription
-            isLoading = false
+    func startObserving() {
+        guard observationTask == nil else {
+            return
+        }
+
+        alertMessage = nil
+        let stream = observeDevicesUseCase.execute()
+        observationTask = Task { @MainActor in
+            for await devices in stream {
+                self.devices = devices
+            }
         }
     }
 }

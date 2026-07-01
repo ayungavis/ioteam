@@ -8,6 +8,7 @@ public final class DeviceRepository: DeviceRepositoryProtocol {
     private let apiClient: APIClientProtocol
     private let bleClient: BLEDeviceProvisioningClient
     private var scanContinuation: AsyncStream<DeviceScanSnapshot>.Continuation?
+    private var deviceContinuations: [UUID: AsyncStream<[DeviceSummary]>.Continuation] = [:]
     private var currentSnapshot: DeviceScanSnapshot
 
     public init(modelContainer: ModelContainer, apiClient: APIClientProtocol, bleClient: BLEDeviceProvisioningClient) {
@@ -33,6 +34,27 @@ public final class DeviceRepository: DeviceRepositoryProtocol {
 
     public func getDevices() async throws -> [DeviceSummary] {
         try await localStore.fetchAll()
+    }
+
+    public func observeDevices() -> AsyncStream<[DeviceSummary]> {
+        AsyncStream { [weak self] continuation in
+            guard let self else {
+                continuation.finish()
+                return
+            }
+
+            let observationID = UUID()
+            deviceContinuations[observationID] = continuation
+            continuation.onTermination = { [weak self] _ in
+                Task { @MainActor in
+                    self?.deviceContinuations.removeValue(forKey: observationID)
+                }
+            }
+
+            Task { @MainActor in
+                await self.publishDevices()
+            }
+        }
     }
 
     public func startScanning() -> AsyncStream<DeviceScanSnapshot> {
@@ -86,6 +108,7 @@ public final class DeviceRepository: DeviceRepositoryProtocol {
         )
 
         try await localStore.upsert(registered)
+        await publishDevices()
         return registered
     }
 
@@ -96,6 +119,7 @@ public final class DeviceRepository: DeviceRepositoryProtocol {
         )
 
         try await localStore.upsert(updated)
+        await publishDevices()
         return updated
     }
 
@@ -106,6 +130,7 @@ public final class DeviceRepository: DeviceRepositoryProtocol {
         )
 
         try await localStore.upsert(updated)
+        await publishDevices()
         return updated
     }
 
@@ -115,11 +140,19 @@ public final class DeviceRepository: DeviceRepositoryProtocol {
         )
 
         try await localStore.delete(deviceID: deviceID)
+        await publishDevices()
     }
 
     private func publishSnapshot(devices: [DiscoveredDevice], state: BLEScanState) {
         currentSnapshot = DeviceScanSnapshot(discoveredDevices: devices, state: state)
         scanContinuation?.yield(currentSnapshot)
+    }
+
+    private func publishDevices() async {
+        let devices = (try? await localStore.fetchAll()) ?? []
+        deviceContinuations.values.forEach { continuation in
+            continuation.yield(devices)
+        }
     }
 
     private func updateDeviceEvent(peripheralID: UUID, payload: BLEDeviceEventPayload) async throws {
@@ -141,5 +174,6 @@ public final class DeviceRepository: DeviceRepositoryProtocol {
         )
 
         try await localStore.upsert(updated)
+        await publishDevices()
     }
 }

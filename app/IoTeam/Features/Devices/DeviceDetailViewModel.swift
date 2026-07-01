@@ -6,36 +6,48 @@ final class DeviceDetailViewModel {
     var device: DeviceSummary?
     var draftName = ""
     var alertMessage: String?
+    var hasReceivedFirstSnapshot = false
 
     private let deviceID: UUID
-    private let getDevicesUseCase: GetDevicesUseCase
+    private let observeDevicesUseCase: ObserveDevicesUseCase
     private let renameDeviceUseCase: RenameDeviceUseCase
     private let setDeviceEnabledUseCase: SetDeviceEnabledUseCase
     private let deleteDeviceUseCase: DeleteDeviceUseCase
+    @ObservationIgnored
+    private var observationTask: Task<Void, Never>?
 
     init(
         deviceID: UUID,
-        getDevicesUseCase: GetDevicesUseCase,
+        observeDevicesUseCase: ObserveDevicesUseCase,
         renameDeviceUseCase: RenameDeviceUseCase,
         setDeviceEnabledUseCase: SetDeviceEnabledUseCase,
         deleteDeviceUseCase: DeleteDeviceUseCase
     ) {
         self.deviceID = deviceID
-        self.getDevicesUseCase = getDevicesUseCase
+        self.observeDevicesUseCase = observeDevicesUseCase
         self.renameDeviceUseCase = renameDeviceUseCase
         self.setDeviceEnabledUseCase = setDeviceEnabledUseCase
         self.deleteDeviceUseCase = deleteDeviceUseCase
     }
 
-    @MainActor
-    func loadData() async {
-        do {
-            device = try await getDevicesUseCase.execute().first(where: { $0.id == deviceID })
-            if draftName.isEmpty {
-                draftName = device?.name ?? ""
+    deinit {
+        observationTask?.cancel()
+    }
+
+    func startObserving() {
+        guard observationTask == nil else {
+            return
+        }
+
+        let stream = observeDevicesUseCase.execute()
+        observationTask = Task { @MainActor in
+            for await devices in stream {
+                hasReceivedFirstSnapshot = true
+                device = devices.first(where: { $0.id == deviceID })
+                if draftName.isEmpty {
+                    draftName = device?.name ?? ""
+                }
             }
-        } catch {
-            alertMessage = error.localizedDescription
         }
     }
 

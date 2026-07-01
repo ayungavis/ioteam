@@ -60,12 +60,18 @@ struct DeviceDetailView: View {
                 }
                 .navigationTitle(device.name)
                 .navigationBarTitleDisplayMode(.inline)
-                .task {
-                    await viewModel.loadData()
-                }
-            } else {
+            } else if viewModel.hasReceivedFirstSnapshot {
                 ContentUnavailableView("Device not found", systemImage: "exclamationmark.triangle")
+            } else {
+                ContentUnavailableView {
+                    ProgressView()
+                } description: {
+                    Text("Loading device details...")
+                }
             }
+        }
+        .task {
+            viewModel.startObserving()
         }
         .alert("Device Error", isPresented: Binding(
             get: { viewModel.alertMessage != nil },

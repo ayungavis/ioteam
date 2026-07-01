@@ -3,6 +3,7 @@ import Foundation
 @MainActor
 public protocol DeviceRepositoryProtocol {
     func getDevices() async throws -> [DeviceSummary]
+    func observeDevices() -> AsyncStream<[DeviceSummary]>
     func startScanning() -> AsyncStream<DeviceScanSnapshot>
     func stopScanning()
     func pairDevice(discoveryID: UUID, customName: String) async throws -> DeviceSummary

@@ -63,7 +63,7 @@ struct DeviceListView: View {
             Text(viewModel.alertMessage ?? "Unknown error")
         }
         .task {
-            await viewModel.loadData()
+            viewModel.startObserving()
         }
     }
 }

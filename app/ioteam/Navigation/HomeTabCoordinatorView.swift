@@ -14,7 +14,7 @@ struct HomeTabCoordinatorView: View {
     @Environment(\.deviceRepository) private var deviceRepository
 
     var body: some View {
-        let getDevicesUseCase = GetDevicesUseCase(repository: deviceRepository)
+        let observeDevicesUseCase = ObserveDevicesUseCase(repository: deviceRepository)
         let startDeviceScanUseCase = StartDeviceScanUseCase(repository: deviceRepository)
         let stopDeviceScanUseCase = StopDeviceScanUseCase(repository: deviceRepository)
         let pairDeviceUseCase = PairDeviceUseCase(repository: deviceRepository)
@@ -25,7 +25,7 @@ struct HomeTabCoordinatorView: View {
         TabView(selection: $tabRouter.selectedTab) {
             NavigationStack(path: $tabRouter.homePath) {
                 DeviceListView(
-                    viewModel: DeviceListViewModel(getDevicesUseCase: getDevicesUseCase),
+                    viewModel: DeviceListViewModel(observeDevicesUseCase: observeDevicesUseCase),
                     makeAddDeviceView: {
                         AddDeviceView(
                             viewModel: AddDeviceViewModel(
@@ -42,7 +42,7 @@ struct HomeTabCoordinatorView: View {
                             DeviceDetailView(
                                 viewModel: DeviceDetailViewModel(
                                     deviceID: id,
-                                    getDevicesUseCase: getDevicesUseCase,
+                                    observeDevicesUseCase: observeDevicesUseCase,
                                     renameDeviceUseCase: renameDeviceUseCase,
                                     setDeviceEnabledUseCase: setDeviceEnabledUseCase,
                                     deleteDeviceUseCase: deleteDeviceUseCase
@@ -54,7 +54,7 @@ struct HomeTabCoordinatorView: View {
             .tabItem { Label("Home", systemImage: "house") }.tag(AppTab.home)
 
             NavigationStack(path: $tabRouter.profilePath) {
-                DeviceProfileView(getDevicesUseCase: getDevicesUseCase)
+                DeviceProfileView(observeDevicesUseCase: observeDevicesUseCase)
             }
             .tabItem { Label("Profile", systemImage: "person") }.tag(AppTab.profile)
         }
@@ -63,7 +63,7 @@ struct HomeTabCoordinatorView: View {
 }
 
 private struct DeviceProfileView: View {
-    let getDevicesUseCase: GetDevicesUseCase
+    let observeDevicesUseCase: ObserveDevicesUseCase
     @State private var deviceCount = 0
 
     var body: some View {
@@ -83,7 +83,10 @@ private struct DeviceProfileView: View {
         }
         .navigationTitle("Profile")
         .task {
-            deviceCount = (try? await getDevicesUseCase.execute().count) ?? 0
+            let stream = observeDevicesUseCase.execute()
+            for await devices in stream {
+                deviceCount = devices.count
+            }
         }
     }
 }
