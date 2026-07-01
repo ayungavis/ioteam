@@ -12,7 +12,11 @@ const successUserResponse: OpenAPIV3.SchemaObject = {
           type: "object",
           properties: {
             id: { type: "string", format: "uuid" },
-            email: { type: "string", format: "email", example: "user@example.com" },
+            email: {
+              type: "string",
+              format: "email",
+              example: "user@example.com",
+            },
             fullName: { type: "string", example: "John Doe" },
             onboardingCompleted: { type: "boolean", example: false },
           },
@@ -39,6 +43,10 @@ const swaggerDocument: OpenAPIV3.Document = {
   },
   servers: [
     { url: "http://localhost:3000", description: "Local development" },
+    {
+      url: "https://resourceful-generosity-staging.up.railway.app",
+      description: "Staging environment",
+    },
   ],
   components: {
     securitySchemes: {
@@ -66,11 +74,13 @@ const swaggerDocument: OpenAPIV3.Document = {
                 properties: {
                   identityToken: {
                     type: "string",
-                    description: "JWT identity token from ASAuthorizationAppleIDCredential",
+                    description:
+                      "JWT identity token from ASAuthorizationAppleIDCredential",
                   },
                   fullName: {
                     type: "string",
-                    description: "User full name — only sent by Apple on first sign-in",
+                    description:
+                      "User full name — only sent by Apple on first sign-in",
                     example: "John Doe",
                   },
                 },
@@ -109,7 +119,11 @@ const swaggerDocument: OpenAPIV3.Document = {
                 type: "object",
                 required: ["email"],
                 properties: {
-                  email: { type: "string", format: "email", example: "dev@example.com" },
+                  email: {
+                    type: "string",
+                    format: "email",
+                    example: "dev@example.com",
+                  },
                   fullName: { type: "string", example: "Dev User" },
                 },
               },
@@ -137,7 +151,8 @@ const swaggerDocument: OpenAPIV3.Document = {
       post: {
         tags: ["Authentication"],
         summary: "Logout",
-        description: "Signals logout. The frontend is responsible for deleting the access token.",
+        description:
+          "Signals logout. The frontend is responsible for deleting the access token.",
         security: [{ bearerAuth: [] }],
         responses: {
           "200": {
@@ -163,7 +178,8 @@ const swaggerDocument: OpenAPIV3.Document = {
       get: {
         tags: ["Authentication"],
         summary: "List active sessions",
-        description: "Returns all active login sessions for the authenticated user.",
+        description:
+          "Returns all active login sessions for the authenticated user.",
         security: [{ bearerAuth: [] }],
         responses: {
           "200": { description: "Session list" },
