@@ -17,7 +17,16 @@ export const userRepository = {
     });
   },
 
-  update(id: string, data: Partial<Pick<User, "fullName" | "dateOfBirth" | "avatarUrl" | "onboardingCompleted">>) {
-    return User.update(data, { where: { id }, returning: true });
+  async update(
+    id: string,
+    data: Partial<Pick<User, "fullName" | "dateOfBirth" | "avatarUrl" | "onboardingCompleted">>
+  ) {
+    const [, rows] = await User.update(data, { where: { id }, returning: true });
+    return rows[0] ?? null;
+  },
+
+  async deleteById(id: string) {
+    const count = await User.destroy({ where: { id } });
+    return count > 0;
   },
 };
