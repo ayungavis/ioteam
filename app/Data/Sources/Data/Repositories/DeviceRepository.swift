@@ -150,7 +150,7 @@ public final class DeviceRepository: DeviceRepositoryProtocol {
 
     private func publishDevices() async {
         let devices = (try? await localStore.fetchAll()) ?? []
-        deviceContinuations.values.forEach { continuation in
+        for continuation in deviceContinuations.values {
             continuation.yield(devices)
         }
     }
