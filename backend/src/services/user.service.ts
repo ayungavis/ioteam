@@ -1,4 +1,5 @@
 import { userRepository } from "../repositories/user.repository";
+import { NotFoundError } from "../errors/AppError";
 
 export const userService = {
   // Find existing user by Apple ID or create a new one.
@@ -19,7 +20,7 @@ export const userService = {
 
   async getProfile(userId: string) {
     const user = await userRepository.findById(userId);
-    if (!user) throw Object.assign(new Error("User not found"), { statusCode: 404 });
+    if (!user) throw new NotFoundError("User not found");
     return user;
   },
 
@@ -28,13 +29,13 @@ export const userService = {
     data: { fullName?: string; dateOfBirth?: string; avatarUrl?: string }
   ) {
     const user = await userRepository.update(userId, data);
-    if (!user) throw Object.assign(new Error("User not found"), { statusCode: 404 });
+    if (!user) throw new NotFoundError("User not found");
     return user;
   },
 
   async completeOnboarding(userId: string) {
     const user = await userRepository.update(userId, { onboardingCompleted: true });
-    if (!user) throw Object.assign(new Error("User not found"), { statusCode: 404 });
+    if (!user) throw new NotFoundError("User not found");
     return user;
   },
 
