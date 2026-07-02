@@ -40,6 +40,28 @@ struct AddDeviceView: View {
                         .textInputAutocapitalization(.words)
                 }
 
+                Section("Wi-Fi") {
+                    TextField("Home Wi-Fi", text: $viewModel.wifiSSID)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+
+                    SecureField("Password (leave blank for open network)", text: $viewModel.wifiPassword)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+
+                    if viewModel.isDetectingWiFi {
+                        ProgressView("Detecting current Wi-Fi...")
+                    } else if let currentWiFiSSID = viewModel.currentWiFiSSID {
+                        Label("Detected Wi-Fi: \(currentWiFiSSID)", systemImage: "wifi")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("Current Wi-Fi is unavailable on this device.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
                 Section {
                     Button("Scan Again") {
                         viewModel.startScanning()
@@ -98,6 +120,7 @@ struct AddDeviceView: View {
     private var canPair: Bool {
         viewModel.selectedDeviceID != nil
             && !viewModel.customName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !viewModel.wifiSSID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !viewModel.isPairing
     }
 
@@ -135,7 +158,7 @@ struct AddDeviceView: View {
         case .noDevicesFound:
             return "The firmware must be advertising as DoseLatch or DoseLatch Setup and stay powered nearby."
         default:
-            return "Only devices advertising the DoseLatch BLE service are shown."
+            return "Only devices advertising the DoseLatch BLE service are shown. The app will join the entered Wi-Fi before pairing."
         }
     }
 }

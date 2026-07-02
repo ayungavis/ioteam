@@ -8,7 +8,7 @@ public final class PairDeviceUseCase {
         self.repository = repository
     }
 
-    public func execute(discoveryID: UUID, customName: String) async throws -> DeviceSummary {
-        try await repository.pairDevice(discoveryID: discoveryID, customName: customName)
+    public func execute(discoveryID: UUID, provisioningInfo: DeviceProvisioningInfo) async throws -> DeviceSummary {
+        try await repository.pairDevice(discoveryID: discoveryID, provisioningInfo: provisioningInfo)
     }
 }

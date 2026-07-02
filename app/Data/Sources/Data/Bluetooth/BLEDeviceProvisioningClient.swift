@@ -12,6 +12,10 @@ struct BLEDeviceInfoPayload: Codable, Sendable, Equatable {
 struct BLEPairCommandPayload: Codable, Sendable, Equatable {
     let pairingToken: String
     let familyId: String
+    let wifiSSID: String
+    let wifiPassword: String
+    let backendMode: String
+    let backendBaseURL: String?
 }
 
 struct BLEDeviceEventPayload: Codable, Sendable, Equatable {
@@ -125,6 +129,10 @@ private struct PairingSession {
     let peripheralID: UUID
     let pairingToken: String
     let familyId: String
+    let wifiSSID: String
+    let wifiPassword: String
+    let backendMode: String
+    let backendBaseURL: String?
     let continuation: CheckedContinuation<BLEDeviceInfoPayload, Error>
 }
 
@@ -180,7 +188,15 @@ public final class BLEDeviceProvisioningClient: NSObject, @unchecked Sendable, C
         onScanStateChanged?(.idle)
     }
 
-    func pairDevice(id: UUID, pairingToken: String, familyId: String) async throws -> BLEDeviceInfoPayload {
+    func pairDevice(
+        id: UUID,
+        pairingToken: String,
+        familyId: String,
+        wifiSSID: String,
+        wifiPassword: String,
+        backendMode: String,
+        backendBaseURL: String?
+    ) async throws -> BLEDeviceInfoPayload {
         try await waitUntilPoweredOn()
 
         guard let peripheral = discoveredPeripherals[id] else {
@@ -192,6 +208,10 @@ public final class BLEDeviceProvisioningClient: NSObject, @unchecked Sendable, C
                 peripheralID: id,
                 pairingToken: pairingToken,
                 familyId: familyId,
+                wifiSSID: wifiSSID,
+                wifiPassword: wifiPassword,
+                backendMode: backendMode,
+                backendBaseURL: backendBaseURL,
                 continuation: continuation
             )
             centralManager.connect(peripheral)
@@ -411,7 +431,16 @@ public final class BLEDeviceProvisioningClient: NSObject, @unchecked Sendable, C
 
         if let session = pairingSession, session.peripheralID == peripheral.identifier {
             do {
-                let payload = try encode(BLEPairCommandPayload(pairingToken: session.pairingToken, familyId: session.familyId))
+                let payload = try encode(
+                    BLEPairCommandPayload(
+                        pairingToken: session.pairingToken,
+                        familyId: session.familyId,
+                        wifiSSID: session.wifiSSID,
+                        wifiPassword: session.wifiPassword,
+                        backendMode: session.backendMode,
+                        backendBaseURL: session.backendBaseURL
+                    )
+                )
                 peripheral.writeValue(payload, for: pairCharacteristic, type: .withResponse)
             } catch {
                 finishPairing(with: .failure(error))

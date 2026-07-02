@@ -71,3 +71,15 @@ public struct PairingTokenResponse: Codable, Sendable, Equatable {
         self.familyId = familyId
     }
 }
+
+public struct DeviceProvisioningInfo: Sendable, Equatable {
+    public let customName: String
+    public let wifiSSID: String
+    public let wifiPassword: String
+
+    public init(customName: String, wifiSSID: String, wifiPassword: String) {
+        self.customName = customName
+        self.wifiSSID = wifiSSID
+        self.wifiPassword = wifiPassword
+    }
+}

@@ -120,7 +120,7 @@ private final class FakeDeviceRepository: DeviceRepositoryProtocol {
 
     func stopScanning() {}
 
-    func pairDevice(discoveryID: UUID, customName: String) async throws -> DeviceSummary {
+    func pairDevice(discoveryID: UUID, provisioningInfo: DeviceProvisioningInfo) async throws -> DeviceSummary {
         throw BLEDeviceProvisioningError.deviceNotFound
     }
 
