@@ -85,7 +85,7 @@ public final class DeviceRepository: DeviceRepositoryProtocol {
         publishSnapshot(devices: currentSnapshot.discoveredDevices, state: .idle)
     }
 
-    public func pairDevice(discoveryID: UUID, customName: String) async throws -> DeviceSummary {
+    public func pairDevice(discoveryID: UUID, provisioningInfo: DeviceProvisioningInfo) async throws -> DeviceSummary {
         let tokenResponse: PairingTokenResponse = try await apiClient.request(
             APIEndpoint(path: "devices/pairing-token", method: .post)
         )
@@ -93,12 +93,16 @@ public final class DeviceRepository: DeviceRepositoryProtocol {
         let info = try await bleClient.pairDevice(
             id: discoveryID,
             pairingToken: tokenResponse.pairingToken,
-            familyId: tokenResponse.familyId
+            familyId: tokenResponse.familyId,
+            wifiSSID: provisioningInfo.wifiSSID,
+            wifiPassword: provisioningInfo.wifiPassword,
+            backendMode: backendMode,
+            backendBaseURL: backendBaseURL
         )
 
         let requestBody = try JSONEncoder().encode([
             "device_id": info.deviceId.uuidString,
-            "device_name": customName,
+            "device_name": provisioningInfo.customName,
             "peripheral_identifier": discoveryID.uuidString,
             "firmware_version": info.firmwareVersion
         ])
@@ -175,5 +179,21 @@ public final class DeviceRepository: DeviceRepositoryProtocol {
 
         try await localStore.upsert(updated)
         await publishDevices()
+    }
+
+    private var backendMode: String {
+        #if DEBUG
+            "mock"
+        #else
+            "http"
+        #endif
+    }
+
+    private var backendBaseURL: String? {
+        #if DEBUG
+            nil
+        #else
+            "https://yourdomain.com"
+        #endif
     }
 }

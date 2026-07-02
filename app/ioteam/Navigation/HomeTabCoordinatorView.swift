@@ -12,6 +12,7 @@ import SwiftUI
 struct HomeTabCoordinatorView: View {
     @AppStorage("appLanguageCode") private var appLanguageCode = AppLanguage.system.rawValue
     @State private var tabRouter = HomeTabRouter()
+    @State private var wiFiProvisioningService = WiFiProvisioningService()
     @Environment(\.deviceRepository) private var deviceRepository
 
     var body: some View {
@@ -32,7 +33,8 @@ struct HomeTabCoordinatorView: View {
                             viewModel: AddDeviceViewModel(
                                 startDeviceScanUseCase: startDeviceScanUseCase,
                                 stopDeviceScanUseCase: stopDeviceScanUseCase,
-                                pairDeviceUseCase: pairDeviceUseCase
+                                pairDeviceUseCase: pairDeviceUseCase,
+                                wiFiProvisioningService: wiFiProvisioningService
                             )
                         )
                     }
