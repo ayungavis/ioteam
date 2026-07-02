@@ -12,6 +12,7 @@ import SwiftUI
 
 @main
 struct IoTeamApp: App {
+    @AppStorage("appLanguageCode") private var appLanguageCode = AppLanguage.system.rawValue
     let sharedContainer: ModelContainer
     let appleSignInUseCase: AppleSignInUseCase
     let deviceRepository: DeviceRepositoryProtocol
@@ -44,10 +45,34 @@ struct IoTeamApp: App {
     var body: some Scene {
         WindowGroup {
             AppRootView()
+                .environment(\.locale, selectedLocale)
                 .environment(\.appleSignInUseCase, appleSignInUseCase)
                 .environment(\.deviceRepository, deviceRepository)
         }
     }
+
+    private var selectedLocale: Locale {
+        guard let language = AppLanguage(rawValue: appLanguageCode) else {
+            return .autoupdatingCurrent
+        }
+
+        switch language {
+        case .system:
+            return .autoupdatingCurrent
+        case .english:
+            return Locale(identifier: "en")
+        case .indonesian:
+            return Locale(identifier: "id")
+        }
+    }
+}
+
+enum AppLanguage: String, CaseIterable, Identifiable {
+    case system
+    case english
+    case indonesian
+
+    var id: String { rawValue }
 }
 
 struct AppleSignInUseCaseKey: EnvironmentKey {

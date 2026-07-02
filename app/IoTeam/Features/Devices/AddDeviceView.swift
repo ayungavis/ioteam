@@ -149,7 +149,7 @@ private struct NearbyDeviceRow: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(device.name)
                     .foregroundStyle(.primary)
-                Text("RSSI \(device.rssi)")
+                Text("RSSI \(device.rssi.formatted())")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
