@@ -67,20 +67,47 @@ public enum BLEDeviceProvisioningError: LocalizedError {
     case serviceMissing
     case characteristicMissing
     case invalidPayload
+    case failedToConnect
     case pairingFailed(String)
 
     public var errorDescription: String? {
         switch self {
         case .bluetoothUnavailable:
-            return "Bluetooth is not available on this device."
+            return String(
+                localized: "Bluetooth is not available on this device.",
+                bundle: .module,
+                comment: "Shown when the current device cannot use Bluetooth for provisioning."
+            )
         case .deviceNotFound:
-            return "The selected DoseLatch device is no longer nearby."
+            return String(
+                localized: "The selected DoseLatch device is no longer nearby.",
+                bundle: .module,
+                comment: "Shown when the selected BLE device disappears before pairing completes."
+            )
         case .serviceMissing:
-            return "DoseLatch BLE service was not found on the device."
+            return String(
+                localized: "DoseLatch BLE service was not found on the device.",
+                bundle: .module,
+                comment: "Shown when the peripheral does not expose the expected provisioning service."
+            )
         case .characteristicMissing:
-            return "DoseLatch BLE characteristic is missing."
+            return String(
+                localized: "DoseLatch BLE characteristic is missing.",
+                bundle: .module,
+                comment: "Shown when the peripheral is missing a required provisioning characteristic."
+            )
         case .invalidPayload:
-            return "DoseLatch sent data in an unexpected format."
+            return String(
+                localized: "DoseLatch sent data in an unexpected format.",
+                bundle: .module,
+                comment: "Shown when the firmware returns malformed provisioning or event data."
+            )
+        case .failedToConnect:
+            return String(
+                localized: "Failed to connect to the DoseLatch device.",
+                bundle: .module,
+                comment: "Shown when CoreBluetooth fails to connect to the selected peripheral."
+            )
         case .pairingFailed(let message):
             return message
         }
@@ -340,7 +367,7 @@ public final class BLEDeviceProvisioningClient: NSObject, @unchecked Sendable, C
     }
 
     public func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
-        finishPairing(with: .failure(error ?? BLEDeviceProvisioningError.pairingFailed("Failed to connect to the DoseLatch device.")))
+        finishPairing(with: .failure(error ?? BLEDeviceProvisioningError.failedToConnect))
     }
 
     public func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {

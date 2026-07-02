@@ -10,6 +10,7 @@ import Foundation
 import SwiftUI
 
 struct HomeTabCoordinatorView: View {
+    @AppStorage("appLanguageCode") private var appLanguageCode = AppLanguage.system.rawValue
     @State private var tabRouter = HomeTabRouter()
     @Environment(\.deviceRepository) private var deviceRepository
 
@@ -58,21 +59,31 @@ struct HomeTabCoordinatorView: View {
             }
             .tabItem { Label("Profile", systemImage: "person") }.tag(AppTab.profile)
         }
+        .id(appLanguageCode)
         .environment(tabRouter)
     }
 }
 
 private struct DeviceProfileView: View {
+    @AppStorage("appLanguageCode") private var appLanguageCode = AppLanguage.system.rawValue
     let observeDevicesUseCase: ObserveDevicesUseCase
     @State private var deviceCount = 0
 
     var body: some View {
         Form {
             Section("DoseLatch") {
-                LabeledContent("Devices", value: "\(deviceCount)")
+                LabeledContent("Devices", value: deviceCount.formatted())
                 Text("Family and medicine flows are still mocked out for this prototype.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
+            }
+
+            Section("App Language") {
+                Picker("App Language", selection: $appLanguageCode) {
+                    Text("System").tag(AppLanguage.system.rawValue)
+                    Text("English").tag(AppLanguage.english.rawValue)
+                    Text("Indonesian").tag(AppLanguage.indonesian.rawValue)
+                }
             }
 
             Section("Session") {

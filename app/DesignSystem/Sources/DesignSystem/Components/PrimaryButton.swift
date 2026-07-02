@@ -8,11 +8,11 @@
 import SwiftUI
 
 public struct PrimaryButton: View {
-    private let title: String
+    private let title: LocalizedStringResource
     private let isLoading: Bool
     private let action: () -> Void
 
-    public init(title: String, isLoading: Bool = false, action: @escaping () -> Void) {
+    public init(title: LocalizedStringResource, isLoading: Bool = false, action: @escaping () -> Void) {
         self.title = title
         self.isLoading = isLoading
         self.action = action
