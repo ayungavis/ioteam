@@ -9,6 +9,7 @@ import { Dose } from "./models/Dose";
 import { DeviceEvent } from "./models/DeviceEvent";
 import { DoseLog } from "./models/DoseLog";
 import { LoginSession } from "./models/LoginSession";
+import { PushToken } from "./models/PushToken";
 
 const DATABASE_URL = process.env.DATABASE_URL;
 if (!DATABASE_URL) throw new Error("DATABASE_URL is not set");
@@ -30,6 +31,7 @@ Dose.initModel(sequelize);
 DeviceEvent.initModel(sequelize);
 DoseLog.initModel(sequelize);
 LoginSession.initModel(sequelize);
+PushToken.initModel(sequelize);
 
 // Associations
 User.hasMany(FamilyMember, { foreignKey: "userId", as: "familyMemberships" });
@@ -65,6 +67,9 @@ DoseLog.belongsTo(Dose, { foreignKey: "doseId", as: "dose" });
 User.hasMany(LoginSession, { foreignKey: "userId", as: "sessions" });
 LoginSession.belongsTo(User, { foreignKey: "userId", as: "user" });
 
+User.hasMany(PushToken, { foreignKey: "userId", as: "pushTokens" });
+PushToken.belongsTo(User, { foreignKey: "userId", as: "user" });
+
 export {
   User,
   Family,
@@ -76,4 +81,5 @@ export {
   DeviceEvent,
   DoseLog,
   LoginSession,
+  PushToken,
 };

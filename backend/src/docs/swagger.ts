@@ -1322,6 +1322,62 @@ const swaggerDocument: OpenAPIV3.Document = {
       },
     },
 
+    // ─── Notification ─────────────────────────────────────────────────────────
+    "/notifications/tokens": {
+      post: {
+        tags: ["Notification"],
+        summary: "Register APNS push token",
+        description:
+          "Registers or refreshes the caller's APNS device token so the dose scheduler can push due/missed/needs-confirmation alerts.",
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["token"],
+                properties: {
+                  token: { type: "string", example: "a1b2c3d4e5f6..." },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "201": {
+            description: "Token registered",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    success: { type: "boolean", example: true },
+                    data: {
+                      type: "object",
+                      properties: { id: { type: "string", format: "uuid" } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          "400": {
+            description: "Missing token",
+            content: {
+              "application/json": { schema: { $ref: "#/components/schemas/Error" } },
+            },
+          },
+          "401": {
+            description: "Unauthorized",
+            content: {
+              "application/json": { schema: { $ref: "#/components/schemas/Error" } },
+            },
+          },
+        },
+      },
+    },
+
     // ─── Medicine ─────────────────────────────────────────────────────────────
     "/medicines": {
       get: {
