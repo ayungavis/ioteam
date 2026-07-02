@@ -14,6 +14,11 @@ final class AddDeviceViewModel {
     var isPairing = false
     var alertMessage: String?
 
+    var selectedDeviceName: String? {
+        guard let selectedDeviceID else { return nil }
+        return visibleDevices.first(where: { $0.id == selectedDeviceID })?.name
+    }
+
     private let startDeviceScanUseCase: StartDeviceScanUseCase
     private let stopDeviceScanUseCase: StopDeviceScanUseCase
     private let pairDeviceUseCase: PairDeviceUseCase

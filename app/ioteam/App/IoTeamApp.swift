@@ -12,10 +12,11 @@ import SwiftUI
 
 @main
 struct IoTeamApp: App {
-    @AppStorage("appLanguageCode") private var appLanguageCode = AppLanguage.system.rawValue
     let sharedContainer: ModelContainer
     let appleSignInUseCase: AppleSignInUseCase
     let deviceRepository: DeviceRepositoryProtocol
+    let wiFiProvisioningService: WiFiProvisioningServiceProtocol
+    let localeManager: LocaleManager
 
     init() {
         do {
@@ -35,6 +36,8 @@ struct IoTeamApp: App {
                 apiClient: networkClient,
                 bleClient: BLEDeviceProvisioningClient()
             )
+            self.wiFiProvisioningService = WiFiProvisioningService()
+            self.localeManager = LocaleManager()
 
             AppRouter.shared.currentFlow = AppLaunchCoordinator.shared.determineInitialFlow()
         } catch {
@@ -45,34 +48,12 @@ struct IoTeamApp: App {
     var body: some Scene {
         WindowGroup {
             AppRootView()
-                .environment(\.locale, selectedLocale)
+                .environment(localeManager)
                 .environment(\.appleSignInUseCase, appleSignInUseCase)
                 .environment(\.deviceRepository, deviceRepository)
+                .environment(\.wiFiProvisioningService, wiFiProvisioningService)
         }
     }
-
-    private var selectedLocale: Locale {
-        guard let language = AppLanguage(rawValue: appLanguageCode) else {
-            return .autoupdatingCurrent
-        }
-
-        switch language {
-        case .system:
-            return .autoupdatingCurrent
-        case .english:
-            return Locale(identifier: "en")
-        case .indonesian:
-            return Locale(identifier: "id")
-        }
-    }
-}
-
-enum AppLanguage: String, CaseIterable, Identifiable {
-    case system
-    case english
-    case indonesian
-
-    var id: String { rawValue }
 }
 
 struct AppleSignInUseCaseKey: EnvironmentKey {
@@ -83,6 +64,10 @@ struct DeviceRepositoryKey: EnvironmentKey {
     @MainActor static let defaultValue: DeviceRepositoryProtocol = FakeDeviceRepository()
 }
 
+struct WiFiProvisioningServiceKey: EnvironmentKey {
+    @MainActor static let defaultValue: WiFiProvisioningServiceProtocol = FakeWiFiProvisioningService()
+}
+
 extension EnvironmentValues {
     var appleSignInUseCase: AppleSignInUseCase {
         get { self[AppleSignInUseCaseKey.self] } set { self[AppleSignInUseCaseKey.self] = newValue }
@@ -90,6 +75,10 @@ extension EnvironmentValues {
 
     var deviceRepository: DeviceRepositoryProtocol {
         get { self[DeviceRepositoryKey.self] } set { self[DeviceRepositoryKey.self] = newValue }
+    }
+
+    var wiFiProvisioningService: WiFiProvisioningServiceProtocol {
+        get { self[WiFiProvisioningServiceKey.self] } set { self[WiFiProvisioningServiceKey.self] = newValue }
     }
 }
 
@@ -134,5 +123,12 @@ private final class FakeDeviceRepository: DeviceRepositoryProtocol {
 
     func deleteDevice(deviceID: UUID) async throws {
         throw BLEDeviceProvisioningError.deviceNotFound
+    }
+}
+
+private final class FakeWiFiProvisioningService: WiFiProvisioningServiceProtocol {
+    func currentSSID() async -> String? { nil }
+    func joinNetworkIfNeeded(ssid: String, passphrase: String) async throws {
+        throw WiFiProvisioningError.unsupported
     }
 }

@@ -16,28 +16,48 @@ public final class AppLaunchCoordinator {
     @MainActor func determineInitialFlow() -> AppFlowState {
         if !UserDefaults.standard.bool(forKey: "hasCompletedOnboarding") { return .onboarding }
         if !UserDefaults.standard.bool(forKey: "userIsAuthenticated") { return .authentication }
+        if !UserDefaults.standard.bool(forKey: "hasCompletedProfileOnboarding") { return .profileOnboarding }
+        if !UserDefaults.standard.bool(forKey: "hasCompletedFamilySetup") { return .familySetup }
         return .dashboard
     }
-    
+
     @MainActor func completeOnboarding() {
         UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
         AppRouter.shared.changeFlow(to: .authentication)
     }
-    
+
     @MainActor func loginSuccess() {
         UserDefaults.standard.set(true, forKey: "userIsAuthenticated")
+        if !UserDefaults.standard.bool(forKey: "hasCompletedProfileOnboarding") {
+            AppRouter.shared.changeFlow(to: .profileOnboarding)
+        } else if !UserDefaults.standard.bool(forKey: "hasCompletedFamilySetup") {
+            AppRouter.shared.changeFlow(to: .familySetup)
+        } else {
+            AppRouter.shared.changeFlow(to: .dashboard)
+        }
+    }
+
+    @MainActor func completeProfileOnboarding() {
+        UserDefaults.standard.set(true, forKey: "hasCompletedProfileOnboarding")
+        AppRouter.shared.changeFlow(to: .familySetup)
+    }
+
+    @MainActor func completeFamilySetup() {
+        UserDefaults.standard.set(true, forKey: "hasCompletedFamilySetup")
         AppRouter.shared.changeFlow(to: .dashboard)
     }
-    
+
     @MainActor
     func logout() {
         UserDefaults.standard.set(false, forKey: "userIsAuthenticated")
-        
+        UserDefaults.standard.set(false, forKey: "hasCompletedProfileOnboarding")
+        UserDefaults.standard.set(false, forKey: "hasCompletedFamilySetup")
+
         Task {
             // Clear runtime bearer headers out immediately to protect user privacy
             await URLSessionAPIClient.clearSessionToken()
         }
-        
+
         AppRouter.shared.changeFlow(to: .authentication)
     }
 }
