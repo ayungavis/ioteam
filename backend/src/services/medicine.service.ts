@@ -15,6 +15,7 @@ import { generateDoses, GeneratedDose } from "./dose.generator";
 export interface ScheduleInput {
   frequencyType: FrequencyType;
   scheduleConfig: ScheduleConfig;
+  timezone: string;
   graceBeforeMinutes?: number;
   graceAfterMinutes?: number;
   startAt: string;
@@ -24,10 +25,21 @@ export interface ScheduleInput {
 interface NormalizedSchedule {
   frequencyType: FrequencyType;
   scheduleConfig: ScheduleConfig;
+  timezone: string;
   graceBeforeMinutes: number;
   graceAfterMinutes: number;
   startAt: Date;
   endAt: Date | null;
+}
+
+// A timezone is valid if Intl accepts it as an IANA identifier.
+function isValidTimeZone(tz: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -48,6 +60,13 @@ function normalizeSchedule(schedule: ScheduleInput): NormalizedSchedule {
   const { frequencyType, scheduleConfig } = schedule;
   if (!scheduleConfig || typeof scheduleConfig !== "object") {
     throw new BadRequestError("scheduleConfig is required");
+  }
+
+  if (!schedule.timezone || typeof schedule.timezone !== "string") {
+    throw new BadRequestError("timezone is required (IANA name, e.g. Asia/Singapore)");
+  }
+  if (!isValidTimeZone(schedule.timezone)) {
+    throw new BadRequestError(`Invalid timezone: ${schedule.timezone}`);
   }
 
   if (!["daily", "weekly", "hourly"].includes(frequencyType)) {
@@ -112,6 +131,7 @@ function normalizeSchedule(schedule: ScheduleInput): NormalizedSchedule {
   return {
     frequencyType,
     scheduleConfig,
+    timezone: schedule.timezone,
     graceBeforeMinutes,
     graceAfterMinutes,
     startAt,
@@ -232,6 +252,7 @@ export const medicineService = {
             id: schedule.id,
             frequencyType: schedule.frequencyType,
             scheduleConfig: schedule.scheduleConfig,
+            timezone: schedule.timezone,
             graceBeforeMinutes: schedule.graceBeforeMinutes,
             graceAfterMinutes: schedule.graceAfterMinutes,
             startAt: schedule.startAt,
@@ -370,6 +391,7 @@ export const medicineService = {
             const generated = generateDoses({
               frequencyType: schedule.frequencyType,
               scheduleConfig: schedule.scheduleConfig,
+              timezone: schedule.timezone,
               startAt: schedule.startAt,
               endAt: schedule.endAt,
               graceBeforeMinutes: schedule.graceBeforeMinutes,
@@ -465,6 +487,7 @@ export const medicineService = {
           medicineId: medicine.id,
           frequencyType: schedule.frequencyType,
           scheduleConfig: schedule.scheduleConfig,
+          timezone: schedule.timezone,
           graceBeforeMinutes: schedule.graceBeforeMinutes,
           graceAfterMinutes: schedule.graceAfterMinutes,
           startAt: schedule.startAt,
@@ -531,6 +554,7 @@ export const medicineService = {
           medicineId: medicine.id,
           frequencyType: schedule.frequencyType,
           scheduleConfig: schedule.scheduleConfig,
+          timezone: schedule.timezone,
           graceBeforeMinutes: schedule.graceBeforeMinutes,
           graceAfterMinutes: schedule.graceAfterMinutes,
           startAt: schedule.startAt,

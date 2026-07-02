@@ -25,6 +25,7 @@ class Schedule extends Model<
   declare medicineId: string;
   declare frequencyType: FrequencyType;
   declare scheduleConfig: ScheduleConfig;
+  declare timezone: string;
   declare graceBeforeMinutes: CreationOptional<number>;
   declare graceAfterMinutes: CreationOptional<number>;
   declare startAt: Date;
@@ -51,6 +52,11 @@ class Schedule extends Model<
           allowNull: false,
         },
         scheduleConfig: { type: DataTypes.JSONB, allowNull: false },
+        timezone: {
+          type: DataTypes.STRING,
+          allowNull: false,
+          defaultValue: "UTC",
+        },
         graceBeforeMinutes: {
           type: DataTypes.INTEGER,
           allowNull: false,

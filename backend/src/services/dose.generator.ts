@@ -1,3 +1,4 @@
+import { fromZonedTime, formatInTimeZone } from "date-fns-tz";
 import { FrequencyType } from "../types";
 import { ScheduleConfig } from "../db/models/Schedule";
 
@@ -12,6 +13,8 @@ export interface GeneratedDose {
 export interface GenerateDosesInput {
   frequencyType: FrequencyType;
   scheduleConfig: ScheduleConfig;
+  // IANA timezone the "HH:MM" times-of-day and calendar days are interpreted in.
+  timezone: string;
   startAt: Date;
   endAt: Date | null;
   graceBeforeMinutes: number;
@@ -38,25 +41,67 @@ function addHours(date: Date, hours: number): Date {
   return new Date(date.getTime() + hours * 3_600_000);
 }
 
-// NOTE: There is no per-schedule timezone column, so "HH:MM" times are combined
-// with the calendar day in UTC. If timezone support is added later, this is the
-// single place that needs to convert local wall-clock time -> UTC.
-function combineDayAndTime(day: Date, time: string): Date {
-  const [hh, mm] = time.split(":").map(Number);
-  return new Date(
-    Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate(), hh, mm, 0, 0)
-  );
+// ─── Timezone helpers ───────────────────────────────────────────────────────
+// A calendar date as seen in a specific timezone (month is 1-12).
+interface LocalDate {
+  year: number;
+  month: number;
+  day: number;
 }
 
+const pad = (n: number, len = 2) => String(n).padStart(len, "0");
+
+// The calendar date an instant falls on in the given timezone.
+function localDateOf(instant: Date, timeZone: string): LocalDate {
+  const [year, month, day] = formatInTimeZone(instant, timeZone, "yyyy-MM-dd")
+    .split("-")
+    .map(Number);
+  return { year, month, day };
+}
+
+// Convert a local wall-clock time (date + HH:MM in timeZone) to a UTC instant.
+// date-fns-tz handles offset resolution, including DST transitions.
+function zonedTimeToUtc(
+  date: LocalDate,
+  hour: number,
+  minute: number,
+  timeZone: string
+): Date {
+  const wallClock = `${pad(date.year, 4)}-${pad(date.month)}-${pad(date.day)}T${pad(hour)}:${pad(minute)}:00`;
+  return fromZonedTime(wallClock, timeZone);
+}
+
+function addLocalDays(date: LocalDate, days: number): LocalDate {
+  const proxy = new Date(Date.UTC(date.year, date.month - 1, date.day));
+  proxy.setUTCDate(proxy.getUTCDate() + days);
+  return {
+    year: proxy.getUTCFullYear(),
+    month: proxy.getUTCMonth() + 1,
+    day: proxy.getUTCDate(),
+  };
+}
+
+function compareLocalDate(a: LocalDate, b: LocalDate): number {
+  if (a.year !== b.year) return a.year - b.year;
+  if (a.month !== b.month) return a.month - b.month;
+  return a.day - b.day;
+}
+
+// 0=Sun..6=Sat for the given calendar date (weekday is timezone-independent).
+function localWeekday(date: LocalDate): number {
+  return new Date(Date.UTC(date.year, date.month - 1, date.day)).getUTCDay();
+}
+
+// ─── Generation ───────────────────────────────────────────────────────────────
 function scheduleAppliesOn(
   frequencyType: FrequencyType,
   config: ScheduleConfig,
-  day: Date
+  date: LocalDate
 ): boolean {
   if (frequencyType === "daily") return true;
   if (frequencyType === "weekly") {
     const weekdays = (config as { weekdays: number[] }).weekdays;
-    return weekdays.includes(day.getUTCDay()); // 0=Sun..6=Sat
+    return weekdays.includes(localWeekday(date));
   }
   return false;
 }
@@ -70,6 +115,7 @@ function buildDose(scheduledAt: Date, input: GenerateDosesInput): GeneratedDose 
   };
 }
 
+// Interval schedules are pure elapsed-time, so timezone never affects them.
 function generateInterval(input: GenerateDosesInput, maxNewDoses: number): GeneratedDose[] {
   const intervalHours = (input.scheduleConfig as { intervalHours: number }).intervalHours;
   const safetyCutoff = addHours(input.startAt, SAFETY_CUTOFF_YEARS * 365 * 24);
@@ -98,52 +144,44 @@ function generateInterval(input: GenerateDosesInput, maxNewDoses: number): Gener
   return doses;
 }
 
+// Calendar schedules (daily/weekly) iterate over *local* days in the schedule's
+// timezone, converting each "HH:MM" to a UTC instant.
 function generateCalendar(input: GenerateDosesInput, maxNewDoses: number): GeneratedDose[] {
+  const tz = input.timezone;
   const times = [...(input.scheduleConfig as { timesOfDay: string[] }).timesOfDay].sort();
-  const safetyCutoff = addHours(input.startAt, SAFETY_CUTOFF_YEARS * 365 * 24);
+  const safetyCutoffMs = addHours(input.startAt, SAFETY_CUTOFF_YEARS * 365 * 24).getTime();
 
   // First materialization anchors on the start day; appends resume the day after
-  // the last existing dose.
-  let currentDay: Date;
-  if (input.lastDoseAt) {
-    currentDay = new Date(input.lastDoseAt);
-    currentDay.setUTCDate(currentDay.getUTCDate() + 1);
-  } else {
-    currentDay = new Date(input.startAt);
-  }
-  currentDay = new Date(
-    Date.UTC(currentDay.getUTCFullYear(), currentDay.getUTCMonth(), currentDay.getUTCDate())
-  );
+  // the last existing dose (both in local time).
+  let currentDate = input.lastDoseAt
+    ? addLocalDays(localDateOf(input.lastDoseAt, tz), 1)
+    : localDateOf(input.startAt, tz);
 
-  // Fast-forward to the notBefore day so we don't scan irrelevant past days.
+  // Fast-forward to the notBefore local day so we don't scan irrelevant past days.
   if (input.notBefore) {
-    const floorDay = new Date(
-      Date.UTC(
-        input.notBefore.getUTCFullYear(),
-        input.notBefore.getUTCMonth(),
-        input.notBefore.getUTCDate()
-      )
-    );
-    if (currentDay < floorDay) currentDay = floorDay;
+    const floor = localDateOf(input.notBefore, tz);
+    if (compareLocalDate(currentDate, floor) < 0) currentDate = floor;
   }
 
   const doses: GeneratedDose[] = [];
   while (doses.length < maxNewDoses) {
-    if (currentDay > safetyCutoff) break;
+    const dayProxyMs = Date.UTC(currentDate.year, currentDate.month - 1, currentDate.day);
+    if (dayProxyMs > safetyCutoffMs) break;
 
-    if (scheduleAppliesOn(input.frequencyType, input.scheduleConfig, currentDay)) {
+    if (scheduleAppliesOn(input.frequencyType, input.scheduleConfig, currentDate)) {
       for (const time of times) {
         if (doses.length >= maxNewDoses) break;
-        const scheduledAt = combineDayAndTime(currentDay, time);
+        const [hh, mm] = time.split(":").map(Number);
+        const scheduledAt = zonedTimeToUtc(currentDate, hh, mm, tz);
         // Skip times before the anchor (e.g. earlier slots on the start day).
-        if (scheduledAt < input.startAt) continue;
+        if (scheduledAt.getTime() < input.startAt.getTime()) continue;
         // Skip past occurrences when rescheduling.
-        if (input.notBefore && scheduledAt <= input.notBefore) continue;
-        if (input.endAt && scheduledAt > input.endAt) return doses;
+        if (input.notBefore && scheduledAt.getTime() <= input.notBefore.getTime()) continue;
+        if (input.endAt && scheduledAt.getTime() > input.endAt.getTime()) return doses;
         doses.push(buildDose(scheduledAt, input));
       }
     }
-    currentDay.setUTCDate(currentDay.getUTCDate() + 1);
+    currentDate = addLocalDays(currentDate, 1);
   }
   return doses;
 }

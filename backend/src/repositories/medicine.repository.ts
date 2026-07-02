@@ -130,6 +130,7 @@ export const medicineRepository = {
       medicineId: string;
       frequencyType: FrequencyType;
       scheduleConfig: ScheduleConfig;
+      timezone: string;
       graceBeforeMinutes: number;
       graceAfterMinutes: number;
       startAt: Date;

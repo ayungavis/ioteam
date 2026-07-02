@@ -136,7 +136,7 @@ const swaggerDocument: OpenAPIV3.Document = {
       },
       ScheduleInput: {
         type: "object",
-        required: ["frequencyType", "scheduleConfig", "startAt"],
+        required: ["frequencyType", "scheduleConfig", "timezone", "startAt"],
         description:
           "Schedule definition. scheduleConfig shape depends on frequencyType.",
         properties: {
@@ -150,6 +150,12 @@ const swaggerDocument: OpenAPIV3.Document = {
             description:
               "daily: { timesOfDay: [\"08:00\",\"20:00\"] } | weekly: { weekdays: [1,3,5], timesOfDay: [\"09:00\"] } (0=Sun..6=Sat) | hourly: { intervalHours: 8 }",
             example: { timesOfDay: ["08:00", "20:00"] },
+          },
+          timezone: {
+            type: "string",
+            description:
+              "IANA timezone the times-of-day are interpreted in. Ignored for hourly (interval) schedules.",
+            example: "Asia/Singapore",
           },
           graceBeforeMinutes: { type: "integer", example: 15, default: 0 },
           graceAfterMinutes: { type: "integer", example: 30, default: 30 },
@@ -166,6 +172,7 @@ const swaggerDocument: OpenAPIV3.Document = {
             enum: ["daily", "weekly", "hourly"],
           },
           scheduleConfig: { type: "object" },
+          timezone: { type: "string", example: "Asia/Singapore" },
           graceBeforeMinutes: { type: "integer", example: 15 },
           graceAfterMinutes: { type: "integer", example: 30 },
           startAt: { type: "string", format: "date-time" },
