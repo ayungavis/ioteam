@@ -1,16 +1,18 @@
 import { Response } from "express";
 import { AuthenticatedRequest } from "../types";
+import { doseService } from "../services/dose.service";
 
 // GET /medicines/:id/doses
 export async function listDoses(
   req: AuthenticatedRequest,
   res: Response
 ): Promise<void> {
-  const { id } = req.params;
-  const { status } = req.query;
+  const { id } = req.params as { id: string };
+  const statusRaw = req.query.status;
+  const status = typeof statusRaw === "string" ? statusRaw : undefined;
 
-  // TODO: return doses for medicine id, optionally filtered by status
-  res.status(501).json({ success: false, error: "Not implemented" });
+  const doses = await doseService.listDoses(req.userId, id, status);
+  res.json({ success: true, data: doses });
 }
 
 // POST /doses/:id/mark-taken
@@ -18,10 +20,9 @@ export async function markTaken(
   req: AuthenticatedRequest,
   res: Response
 ): Promise<void> {
-  const { id } = req.params;
-
-  // TODO: mark dose as taken (manual source), record taken time, decrement quantity
-  res.status(501).json({ success: false, error: "Not implemented" });
+  const { id } = req.params as { id: string };
+  const result = await doseService.markTaken(req.userId, id);
+  res.json({ success: true, data: result });
 }
 
 // POST /doses/:id/mark-skipped
