@@ -1,13 +1,14 @@
 import { Response } from "express";
 import { AuthenticatedRequest } from "../types";
+import { medicineService, ScheduleInput } from "../services/medicine.service";
 
 // GET /medicines
 export async function listMedicines(
   req: AuthenticatedRequest,
   res: Response
 ): Promise<void> {
-  // TODO: return all medicines for req.familyId
-  res.status(501).json({ success: false, error: "Not implemented" });
+  const medicines = await medicineService.listMedicines(req.userId);
+  res.json({ success: true, data: medicines });
 }
 
 // POST /medicines/preview-doses
@@ -16,20 +17,19 @@ export async function previewDoses(
   req: AuthenticatedRequest,
   res: Response
 ): Promise<void> {
-  const { quantity, schedule } = req.body as {
+  const { quantity, pillPerDose, schedule } = req.body as {
     quantity: number;
-    schedule: unknown;
+    pillPerDose?: number;
+    schedule: ScheduleInput;
   };
 
-  if (!quantity || !schedule) {
-    res
-      .status(400)
-      .json({ success: false, error: "quantity and schedule are required" });
-    return;
-  }
+  const result = await medicineService.previewDoses(req.userId, {
+    quantity,
+    pillPerDose,
+    schedule,
+  });
 
-  // TODO: run dose generation algorithm and return preview list
-  res.status(501).json({ success: false, error: "Not implemented" });
+  res.json({ success: true, data: result });
 }
 
 // POST /medicines
@@ -37,23 +37,23 @@ export async function createMedicine(
   req: AuthenticatedRequest,
   res: Response
 ): Promise<void> {
-  const { name, deviceId, quantity, schedule } = req.body as {
+  const { name, deviceId, quantity, pillPerDose, schedule } = req.body as {
     name: string;
     deviceId: string;
     quantity: number;
-    schedule: unknown;
+    pillPerDose?: number;
+    schedule: ScheduleInput;
   };
 
-  if (!name || !deviceId || !quantity || !schedule) {
-    res.status(400).json({
-      success: false,
-      error: "name, deviceId, quantity, and schedule are required",
-    });
-    return;
-  }
+  const result = await medicineService.createMedicine(req.userId, {
+    name,
+    deviceId,
+    quantity,
+    pillPerDose,
+    schedule,
+  });
 
-  // TODO: create medicine, schedule, and generate doses
-  res.status(501).json({ success: false, error: "Not implemented" });
+  res.status(201).json({ success: true, data: result });
 }
 
 // GET /medicines/:id
@@ -61,27 +61,33 @@ export async function getMedicine(
   req: AuthenticatedRequest,
   res: Response
 ): Promise<void> {
-  const { id } = req.params;
-
-  // TODO: return medicine detail with schedule and dose summary
-  res.status(501).json({ success: false, error: "Not implemented" });
+  const { id } = req.params as { id: string };
+  const medicine = await medicineService.getMedicine(req.userId, id);
+  res.json({ success: true, data: medicine });
 }
 
 // PATCH /medicines/:id
+// Updates metadata (name/status/device) and/or adjusts quantity by a signed delta.
 export async function updateMedicine(
   req: AuthenticatedRequest,
   res: Response
 ): Promise<void> {
-  const { id } = req.params;
-  const { name, quantity, status, deviceId } = req.body as {
+  const { id } = req.params as { id: string };
+  const { name, status, deviceId, adjustQuantity } = req.body as {
     name?: string;
-    quantity?: number;
-    status?: string;
+    status?: "active" | "disabled";
     deviceId?: string;
+    adjustQuantity?: number;
   };
 
-  // TODO: update medicine fields, verify family ownership
-  res.status(501).json({ success: false, error: "Not implemented" });
+  const result = await medicineService.updateMedicine(req.userId, id, {
+    name,
+    status,
+    deviceId,
+    adjustQuantity,
+  });
+
+  res.json({ success: true, data: result });
 }
 
 // POST /medicines/:id/reschedule-preview
@@ -90,10 +96,14 @@ export async function reschedulePreview(
   req: AuthenticatedRequest,
   res: Response
 ): Promise<void> {
-  const { id } = req.params;
+  const { id } = req.params as { id: string };
+  const { schedule } = req.body as { schedule: ScheduleInput };
 
-  // TODO: compute new future doses without writing them
-  res.status(501).json({ success: false, error: "Not implemented" });
+  const result = await medicineService.reschedulePreview(req.userId, id, {
+    schedule,
+  });
+
+  res.json({ success: true, data: result });
 }
 
 // POST /medicines/:id/reschedule
@@ -102,14 +112,12 @@ export async function reschedule(
   req: AuthenticatedRequest,
   res: Response
 ): Promise<void> {
-  const { id } = req.params;
-  const { quantity, schedule } = req.body as {
-    quantity?: number;
-    schedule?: unknown;
-  };
+  const { id } = req.params as { id: string };
+  const { schedule } = req.body as { schedule: ScheduleInput };
 
-  // TODO: delete future pending doses, generate new ones, preserve history
-  res.status(501).json({ success: false, error: "Not implemented" });
+  const result = await medicineService.reschedule(req.userId, id, { schedule });
+
+  res.json({ success: true, data: result });
 }
 
 // DELETE /medicines/:id
@@ -117,8 +125,7 @@ export async function deleteMedicine(
   req: AuthenticatedRequest,
   res: Response
 ): Promise<void> {
-  const { id } = req.params;
-
-  // TODO: soft-delete or archive medicine, retain historical dose logs
-  res.status(501).json({ success: false, error: "Not implemented" });
+  const { id } = req.params as { id: string };
+  const result = await medicineService.deleteMedicine(req.userId, id);
+  res.json({ success: true, data: result });
 }
