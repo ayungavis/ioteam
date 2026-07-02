@@ -1,7 +1,8 @@
 import { Op, Transaction } from "sequelize";
 import { Dose } from "../db/models/Dose";
 import { DoseLog } from "../db/models/DoseLog";
-import { DoseStatus, DoseLogEventType, TakenSource } from "../types";
+import { Medicine } from "../db/models/Medicine";
+import { DoseStatus, DoseLogEventType } from "../types";
 
 export const doseRepository = {
   // All doses for a medicine, chronological, optionally filtered by status.
@@ -17,6 +18,27 @@ export const doseRepository = {
 
   findById(id: string) {
     return Dose.findByPk(id);
+  },
+
+  // Doses awaiting action whose grace window contains `at`, for active medicines
+  // linked to the given device. These are the candidates an "open" event matches.
+  findMatchingDoses(deviceId: string, at: Date) {
+    return Dose.findAll({
+      where: {
+        status: { [Op.in]: ["pending", "due"] },
+        windowStartAt: { [Op.lte]: at },
+        windowEndAt: { [Op.gte]: at },
+      },
+      include: [
+        {
+          model: Medicine,
+          as: "medicine",
+          where: { deviceId, status: "active" },
+          required: true,
+        },
+      ],
+      order: [["scheduledAt", "ASC"]],
+    });
   },
 
   async update(

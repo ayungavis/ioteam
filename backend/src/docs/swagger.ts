@@ -227,6 +227,53 @@ const swaggerDocument: OpenAPIV3.Document = {
           nextDoseAt: { type: "string", format: "date-time", nullable: true },
         },
       },
+      Dose: {
+        type: "object",
+        properties: {
+          id: { type: "string", format: "uuid" },
+          scheduleId: { type: "string", format: "uuid" },
+          medicineId: { type: "string", format: "uuid" },
+          scheduledAt: { type: "string", format: "date-time" },
+          windowStartAt: { type: "string", format: "date-time" },
+          windowEndAt: { type: "string", format: "date-time" },
+          doseAmount: { type: "integer", example: 1 },
+          status: {
+            type: "string",
+            enum: [
+              "pending",
+              "due",
+              "taken",
+              "missed",
+              "skipped",
+              "needs_confirmation",
+              "disabled",
+            ],
+            example: "pending",
+          },
+          actualTakenAt: {
+            type: "string",
+            format: "date-time",
+            nullable: true,
+          },
+          takenSource: {
+            type: "string",
+            enum: ["device_event", "manual"],
+            nullable: true,
+          },
+        },
+      },
+      DeviceEvent: {
+        type: "object",
+        properties: {
+          id: { type: "string", format: "uuid" },
+          deviceId: { type: "string", format: "uuid" },
+          eventType: { type: "string", enum: ["open", "close"] },
+          deviceTimestamp: { type: "string", format: "date-time" },
+          serverReceivedAt: { type: "string", format: "date-time" },
+          firmwareVersion: { type: "string", nullable: true },
+          rawPayload: { type: "object", nullable: true },
+        },
+      },
     },
   },
   paths: {
@@ -1322,6 +1369,99 @@ const swaggerDocument: OpenAPIV3.Document = {
       },
     },
 
+    "/devices/{id}/events": {
+      post: {
+        tags: ["Device"],
+        summary: "Ingest a device event",
+        description:
+          "Records a reed-switch open/close event from the ESP32 and refreshes device liveness. Debounces near-duplicate events. Does not perform dose matching.",
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: "id",
+            in: "path",
+            required: true,
+            schema: { type: "string", format: "uuid" },
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["eventType", "deviceTimestamp"],
+                properties: {
+                  eventType: {
+                    type: "string",
+                    enum: ["open", "close"],
+                  },
+                  deviceTimestamp: {
+                    type: "string",
+                    format: "date-time",
+                    description: "When the event occurred on the device (ISO 8601).",
+                  },
+                  firmwareVersion: { type: "string", example: "1.0.3" },
+                  raw_payload: {
+                    type: "string",
+                    description:
+                      "Stringified JSON of the original device payload; parsed and stored as an object.",
+                    example: '{"reed":"open","battery":87}',
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description:
+              "Event processed. status is one of: recorded, debounced, ignored_disabled.",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    success: { type: "boolean", example: true },
+                    data: {
+                      type: "object",
+                      properties: {
+                        status: {
+                          type: "string",
+                          enum: ["recorded", "debounced", "ignored_disabled"],
+                          example: "recorded",
+                        },
+                        event: {
+                          allOf: [{ $ref: "#/components/schemas/DeviceEvent" }],
+                          nullable: true,
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          "400": {
+            description: "Invalid eventType or deviceTimestamp",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/Error" },
+              },
+            },
+          },
+          "404": {
+            description: "Device not found",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/Error" },
+              },
+            },
+          },
+        },
+      },
+    },
+
     // ─── Medicine ─────────────────────────────────────────────────────────────
     "/medicines": {
       get: {
@@ -1832,6 +1972,148 @@ const swaggerDocument: OpenAPIV3.Document = {
           },
           "404": {
             description: "Medicine not found",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/Error" },
+              },
+            },
+          },
+        },
+      },
+    },
+
+    "/medicines/{id}/doses": {
+      get: {
+        tags: ["Medicine"],
+        summary: "List a medicine's doses",
+        description:
+          "Returns the medicine's doses in chronological order, optionally filtered by one or more comma-separated statuses.",
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: "id",
+            in: "path",
+            required: true,
+            schema: { type: "string", format: "uuid" },
+          },
+          {
+            name: "status",
+            in: "query",
+            required: false,
+            description:
+              "Comma-separated dose statuses to filter by, e.g. 'pending,due'.",
+            schema: { type: "string", example: "pending,due" },
+          },
+        ],
+        responses: {
+          "200": {
+            description: "Dose list",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    success: { type: "boolean", example: true },
+                    data: {
+                      type: "array",
+                      items: { $ref: "#/components/schemas/Dose" },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          "400": {
+            description: "Invalid dose status",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/Error" },
+              },
+            },
+          },
+          "403": {
+            description: "Medicine does not belong to your family",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/Error" },
+              },
+            },
+          },
+          "404": {
+            description: "Medicine not found",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/Error" },
+              },
+            },
+          },
+        },
+      },
+    },
+
+    // ─── Dose ─────────────────────────────────────────────────────────────────
+    "/doses/{id}/mark-taken": {
+      post: {
+        tags: ["Dose"],
+        summary: "Mark a dose as taken",
+        description:
+          "Manually marks a dose taken, records the taken time, decrements the medicine's remaining quantity, and logs the action.",
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: "id",
+            in: "path",
+            required: true,
+            schema: { type: "string", format: "uuid" },
+          },
+        ],
+        responses: {
+          "200": {
+            description: "Dose marked taken",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    success: { type: "boolean", example: true },
+                    data: {
+                      type: "object",
+                      properties: {
+                        dose: { $ref: "#/components/schemas/Dose" },
+                        remainingQuantity: { type: "integer", example: 41 },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          "400": {
+            description: "Cannot mark a disabled dose as taken",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/Error" },
+              },
+            },
+          },
+          "403": {
+            description: "Dose's medicine does not belong to your family",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/Error" },
+              },
+            },
+          },
+          "404": {
+            description: "Dose not found",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/Error" },
+              },
+            },
+          },
+          "409": {
+            description: "Dose is already marked as taken",
             content: {
               "application/json": {
                 schema: { $ref: "#/components/schemas/Error" },

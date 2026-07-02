@@ -1,6 +1,7 @@
-import { Op } from "sequelize";
+import { Op, Transaction } from "sequelize";
 import { Device } from "../db/models/Device";
-import { DeviceConnectionType, DeviceStatus } from "../types";
+import { DeviceEvent } from "../db/models/DeviceEvent";
+import { DeviceConnectionType, DeviceEventType } from "../types";
 
 export const deviceRepository = {
   findByFamily(familyId: string) {
@@ -30,11 +31,13 @@ export const deviceRepository = {
 
   async update(
     id: string,
-    data: Partial<Pick<Device, "name" | "status" | "firmwareVersion" | "lastSeenAt">>
+    data: Partial<Pick<Device, "name" | "status" | "firmwareVersion" | "lastSeenAt">>,
+    transaction?: Transaction
   ) {
     const [, rows] = await Device.update(data, {
       where: { id },
       returning: true,
+      transaction,
     });
     return rows[0] ?? null;
   },
@@ -42,5 +45,27 @@ export const deviceRepository = {
   async softDelete(id: string) {
     const [count] = await Device.update({ status: "deleted" }, { where: { id } });
     return count > 0;
+  },
+
+  createEvent(
+    data: {
+      deviceId: string;
+      eventType: DeviceEventType;
+      deviceTimestamp: Date;
+      serverReceivedAt: Date;
+      firmwareVersion?: string | null;
+      rawPayload?: object | null;
+    },
+    transaction?: Transaction
+  ) {
+    return DeviceEvent.create(data, { transaction });
+  },
+
+  // Most recent event of the same type for a device — used to debounce reed bounce.
+  findLatestEvent(deviceId: string, eventType: DeviceEventType) {
+    return DeviceEvent.findOne({
+      where: { deviceId, eventType },
+      order: [["deviceTimestamp", "DESC"]],
+    });
   },
 };
