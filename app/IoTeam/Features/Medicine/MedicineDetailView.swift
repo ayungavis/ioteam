@@ -149,11 +149,8 @@ private struct AddMedicineForm: View {
         case .daily:
             VStack(alignment: .leading, spacing: 8) {
                 Text("Times of Day").font(.system(size: 13)).foregroundColor(.brandTextSecondary)
-                ForEach(viewModel.dailyTimes.indices, id: \.self) { index in
-                    DatePicker("Time", selection: Binding(
-                        get: { viewModel.dailyTimes[index] },
-                        set: { viewModel.dailyTimes[index] = $0 }
-                    ), displayedComponents: .hourAndMinute)
+                ForEach($viewModel.dailyTimes, id: \.self) { $time in
+                    DatePicker("Time", selection: $time, displayedComponents: .hourAndMinute)
                         .tint(Color.brandAccent)
                 }
                 Button {
@@ -169,9 +166,31 @@ private struct AddMedicineForm: View {
                 Text("Weekdays").font(.system(size: 13)).foregroundColor(.brandTextSecondary)
                 let days = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"]
                 FlexibleWeekdayPicker(selected: $viewModel.weeklyDays, days: days)
-                Text("Time").font(.system(size: 13)).foregroundColor(.brandTextSecondary).padding(.top, 8)
-                DatePicker("Time", selection: $viewModel.weeklyTime, displayedComponents: .hourAndMinute)
-                    .tint(Color.brandAccent)
+                Text("Times of Day").font(.system(size: 13)).foregroundColor(.brandTextSecondary).padding(.top, 8)
+                ForEach($viewModel.weeklyTimes, id: \.self) { $time in
+                    HStack {
+                        DatePicker("Time", selection: $time, displayedComponents: .hourAndMinute)
+                            .tint(Color.brandAccent)
+                        if viewModel.weeklyTimes.count > 1 {
+                            Button {
+                                if let idx = viewModel.weeklyTimes.firstIndex(of: time) {
+                                    viewModel.weeklyTimes.remove(at: idx)
+                                }
+                            } label: {
+                                Image(systemName: "minus.circle.fill")
+                                    .foregroundColor(.red)
+                                    .font(.system(size: 18))
+                            }
+                        }
+                    }
+                }
+                Button {
+                    viewModel.weeklyTimes.append(Date())
+                } label: {
+                    Label("Add time", systemImage: "plus")
+                        .font(.system(size: 14))
+                        .foregroundColor(.brandAccent)
+                }
             }
         case .hourly:
             VStack(alignment: .leading, spacing: 8) {

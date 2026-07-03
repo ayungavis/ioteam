@@ -16,8 +16,12 @@ final class MedicineDetailViewModel {
     var quantity = 1
     var frequency: MedicineFrequency = .daily
     var dailyTimes: [Date] = [Calendar.current.date(from: DateComponents(hour: 8, minute: 0))!]
-    var weeklyDays: Set<String> = ["Monday"]
-    var weeklyTime: Date = Calendar.current.date(from: DateComponents(hour: 9, minute: 0))!
+    var weeklyDays: Set<String> = ["Sunday", "Saturday"]
+    var weeklyTimes: [Date] = [
+        Calendar.current.date(from: DateComponents(hour: 6, minute: 0))!,
+        Calendar.current.date(from: DateComponents(hour: 12, minute: 0))!,
+        Calendar.current.date(from: DateComponents(hour: 18, minute: 0))!
+    ]
     var hourlyInterval = 8
     var graceBeforeMinutes = 15
     var graceAfterMinutes = 30
@@ -74,7 +78,8 @@ final class MedicineDetailViewModel {
         case .weekly:
             let days = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"]
             let selected = days.filter { weeklyDays.contains($0) }.joined(separator: ", ")
-            return "\(selected) at \(weeklyTime.formatted(date: .omitted, time: .shortened))"
+            let times = weeklyTimes.map { $0.formatted(date: .omitted, time: .shortened) }.joined(separator: ", ")
+            return "\(selected) at \(times)"
         case .hourly:
             return "Every \(hourlyInterval) hours"
         }
