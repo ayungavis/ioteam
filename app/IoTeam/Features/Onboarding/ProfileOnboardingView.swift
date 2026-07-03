@@ -1,21 +1,12 @@
 import DesignSystem
+import Domain
 import SwiftUI
 
 struct ProfileOnboardingView: View {
-    @State private var fullName: String = ""
-    @State private var dateOfBirth: Date? = nil
-    @State private var showDatePicker = false
-    @State private var email: String = "kevran.w@icloud.com"
+    @State private var viewModel: ProfileOnboardingViewModel
 
-    private let dateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .long
-        formatter.timeStyle = .none
-        return formatter
-    }()
-
-    var isFormValid: Bool {
-        !fullName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && dateOfBirth != nil
+    init(viewModel: ProfileOnboardingViewModel) {
+        _viewModel = State(initialValue: viewModel)
     }
 
     var body: some View {
@@ -33,115 +24,176 @@ struct ProfileOnboardingView: View {
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 24) {
-                        // Full Name Field
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Full Name")
-                                .font(.system(size: 16, weight: .medium))
-                                .foregroundColor(.brandTextPrimary)
+                        ProfileFormFields(viewModel: viewModel)
 
-                            TextField("Enter Name", text: $fullName)
-                                .font(.system(size: 16))
-                                .foregroundColor(.brandTextPrimary)
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 14)
-                                .background(Color.brandCard)
-                                .cornerRadius(12)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .stroke(Color.brandBorder, lineWidth: 1)
-                                )
-                        }
-
-                        // Date of Birth Field
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Date of Birth")
-                                .font(.system(size: 16, weight: .medium))
-                                .foregroundColor(.brandTextPrimary)
-
-                            Button(action: {
-                                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                                    showDatePicker.toggle()
-                                }
-                            }) {
-                                HStack {
-                                    if let dob = dateOfBirth {
-                                        Text(dob, formatter: dateFormatter)
-                                            .foregroundColor(.brandTextPrimary)
-                                    } else {
-                                        Text("Date of Birth")
-                                            .foregroundColor(Color.brandTextTertiary)
-                                    }
-                                    Spacer()
-                                    Image(systemName: "calendar")
-                                        .font(.system(size: 18))
-                                        .foregroundColor(.brandTextPrimary)
-                                }
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 14)
-                                .background(Color.brandCard)
-                                .cornerRadius(12)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .stroke(Color.brandBorder, lineWidth: 1)
-                                )
-                            }
-
-                            if showDatePicker {
-                                DatePicker(
-                                    "",
-                                    selection: Binding(
-                                        get: { dateOfBirth ?? Date() },
-                                        set: {
-                                            dateOfBirth = $0
-                                        }
-                                    ),
-                                    in: ...Date(),
-                                    displayedComponents: .date
-                                )
-                                .datePickerStyle(.graphical)
-                                .tint(Color.brandAccent)
-                                .padding(12)
-                                .background(Color.brandCard)
-                                .cornerRadius(12)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .stroke(Color.brandBorder, lineWidth: 1)
-                                )
-                                .transition(.opacity.combined(with: .move(edge: .top)))
-                            }
-                        }
-
-                        // Email Field (Read-only / Disabled)
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Email")
-                                .font(.system(size: 16, weight: .medium))
-                                .foregroundColor(.brandTextPrimary)
-
-                            Text(email)
-                                .font(.system(size: 16))
-                                .foregroundColor(Color.brandTextTertiary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 14)
-                                .background(Color.brandDisabledFill)
-                                .cornerRadius(12)
+                        if let errorMessage = viewModel.errorMessage {
+                            Text(errorMessage)
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundStyle(.red)
+                                .multilineTextAlignment(.leading)
                         }
                     }
                     .padding(.horizontal, 24)
+                    .padding(.bottom, 24)
                 }
 
                 Spacer()
 
-                PrimaryButton("Continue", isValid: isFormValid, icon: .arrow) {
-                    AppLaunchCoordinator.shared.completeProfileOnboarding()
+                PrimaryButton(
+                    "Continue",
+                    isValid: viewModel.isFormValid,
+                    isLoading: viewModel.isSavingProfile,
+                    icon: .arrow
+                ) {
+                    Task { await viewModel.submitProfile() }
                 }
                 .padding(.horizontal, 24)
                 .padding(.bottom, 30)
             }
         }
+        .task {
+            await viewModel.loadProfileIfNeeded()
+        }
+    }
+}
+
+private struct ProfileFormFields: View {
+    @Bindable var viewModel: ProfileOnboardingViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            ProfileTextField(
+                title: "Full Name",
+                placeholder: "Enter Name",
+                text: $viewModel.fullName
+            )
+            .textInputAutocapitalization(.words)
+
+            ProfileDateField(viewModel: viewModel)
+
+            ReadOnlyField(title: "Email", value: viewModel.email)
+        }
+        .overlay {
+            if viewModel.isLoadingProfile {
+                ProgressView()
+                    .padding()
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+            }
+        }
+    }
+}
+
+private struct ProfileDateField: View {
+    @Bindable var viewModel: ProfileOnboardingViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Date of Birth")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(Color.brandTextPrimary)
+
+            Button {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                    viewModel.showDatePicker.toggle()
+                }
+            } label: {
+                HStack {
+                    Text(viewModel.displayedDateText())
+                        .foregroundStyle(viewModel.dateOfBirth == nil ? Color.brandTextTertiary : Color.brandTextPrimary)
+                    Spacer()
+                    Image(systemName: "calendar")
+                        .font(.system(size: 18))
+                        .foregroundStyle(Color.brandTextPrimary)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 14)
+                .background(Color.brandCard)
+                .clipShape(.rect(cornerRadius: 12))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color.brandBorder, lineWidth: 1)
+                }
+            }
+            .buttonStyle(.plain)
+
+            if viewModel.showDatePicker {
+                DatePicker(
+                    "",
+                    selection: Binding(
+                        get: { viewModel.dateOfBirth ?? Date() },
+                        set: { viewModel.dateOfBirth = $0 }
+                    ),
+                    in: ...Date(),
+                    displayedComponents: .date
+                )
+                .datePickerStyle(.graphical)
+                .tint(Color.brandAccent)
+                .padding(12)
+                .background(Color.brandCard)
+                .clipShape(.rect(cornerRadius: 12))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color.brandBorder, lineWidth: 1)
+                }
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+    }
+}
+
+struct ProfileTextField: View {
+    let title: String
+    let placeholder: String
+    @Binding var text: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(Color.brandTextPrimary)
+
+            TextField(placeholder, text: $text)
+                .font(.system(size: 16))
+                .foregroundStyle(Color.brandTextPrimary)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 14)
+                .background(Color.brandCard)
+                .clipShape(.rect(cornerRadius: 12))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color.brandBorder, lineWidth: 1)
+                }
+        }
+    }
+}
+
+private struct ReadOnlyField: View {
+    let title: String
+    let value: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(Color.brandTextPrimary)
+
+            Text(value)
+                .font(.system(size: 16))
+                .foregroundStyle(Color.brandTextTertiary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 14)
+                .background(Color.brandDisabledFill)
+                .clipShape(.rect(cornerRadius: 12))
+        }
     }
 }
 
 #Preview {
-    ProfileOnboardingView()
+    ProfileOnboardingView(
+        viewModel: ProfileOnboardingViewModel(
+            getCurrentUserProfileUseCase: GetCurrentUserProfileUseCase(client: MockAPIClient()),
+            updateCurrentUserProfileUseCase: UpdateCurrentUserProfileUseCase(client: MockAPIClient())
+        )
+    )
 }

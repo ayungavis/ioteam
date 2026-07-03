@@ -12,6 +12,7 @@ import SwiftUI
 
 struct LoginView: View {
     @State private var viewModel: LoginViewModel
+    private let nameFormatter = PersonNameComponentsFormatter()
     
     init(viewModel: LoginViewModel) {
         _viewModel = State(initialValue: viewModel)
@@ -59,11 +60,16 @@ struct LoginView: View {
                         switch result {
                         case .success(let auth):
                             if let credential = auth.credential as? ASAuthorizationAppleIDCredential {
-                                let userId = credential.user
                                 let tokenStr = credential.identityToken
                                     .flatMap { String(data: $0, encoding: .utf8) }
                                     ?? ""
-                                Task { await viewModel.processAppleAuthentication(token: tokenStr, userId: userId) }
+                                let fullName = formattedFullName(from: credential.fullName)
+                                Task {
+                                    await viewModel.processAppleAuthentication(
+                                        token: tokenStr,
+                                        fullName: fullName
+                                    )
+                                }
                             } else {
                                 viewModel.loginErrorMessage = "Could not retrieve Apple credentials."
                             }
@@ -85,21 +91,6 @@ struct LoginView: View {
                     .signInWithAppleButtonStyle(.black)
                     .frame(height: 50)
                     .clipShape(Capsule())
-
-                    #if DEBUG
-                    Button {
-                        Task { await viewModel.processAppleAuthentication(token: "mock-token", userId: "mock-user") }
-                    } label: {
-                        Text("Skip sign-in (Debug)")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundColor(Color.brandAccentStrong)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 50)
-                            .overlay(
-                                Capsule().stroke(Color.brandAccentStrong, lineWidth: 1.5)
-                            )
-                    }
-                    #endif
                 }
                 .padding(.horizontal, 24)
 
@@ -138,6 +129,14 @@ struct LoginView: View {
                 .padding(.bottom, 20)
             }
         }
+    }
+    
+    private func formattedFullName(from components: PersonNameComponents?) -> String? {
+        guard let components else {
+            return nil
+        }
+        let fullName = nameFormatter.string(from: components).trimmingCharacters(in: .whitespacesAndNewlines)
+        return fullName.isEmpty ? nil : fullName
     }
 }
 

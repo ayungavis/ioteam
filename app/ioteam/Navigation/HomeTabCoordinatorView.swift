@@ -12,6 +12,7 @@ import SwiftUI
 
 struct HomeTabCoordinatorView: View {
     @Environment(LocaleManager.self) private var localeManager
+    @Environment(AppNotificationManager.self) private var notificationManager
     @State private var tabRouter = HomeTabRouter()
     @Environment(\.deviceRepository) private var deviceRepository
     @Environment(\.wiFiProvisioningService) private var wiFiProvisioningService
@@ -88,6 +89,13 @@ struct HomeTabCoordinatorView: View {
         .tint(Color.brandAccent)
         .id(localeManager.languageCode)
         .environment(tabRouter)
+        .task {
+            await notificationManager.refreshRemoteNotificationsIfPossible()
+            notificationManager.consumePendingRoute(using: tabRouter)
+        }
+        .onChange(of: notificationManager.pendingRoute) { _, _ in
+            notificationManager.consumePendingRoute(using: tabRouter)
+        }
     }
 }
 

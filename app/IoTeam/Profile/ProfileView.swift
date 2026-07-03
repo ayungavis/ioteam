@@ -11,6 +11,7 @@ import Domain
 struct ProfileView: View {
     // MARK: - Dependencies & State
     @Environment(LocaleManager.self) private var localeManager
+    @Environment(AppSessionStore.self) private var sessionStore
     let observeDevicesUseCase: ObserveDevicesUseCase
     
     @State private var deviceCount = 0
@@ -46,11 +47,11 @@ struct ProfileView: View {
                                 .background(Circle().fill(Color.gray.opacity(0.2)))
                             
                             VStack(alignment: .leading, spacing: 4) {
-                                Text("Kevran Winardi")
+                                Text(displayName)
                                     .font(.system(size: 18, weight: .regular))
                                     .foregroundColor(.black)
                                 
-                                Text("kevran.w@icloud.com")
+                                Text(displayEmail)
                                     .font(.system(size: 14))
                                     .foregroundColor(Color.black.opacity(0.5))
                             }
@@ -162,6 +163,14 @@ struct ProfileView: View {
                 deviceCount = devices.count
             }
         }
+    }
+    
+    private var displayName: String {
+        sessionStore.currentUser?.fullName ?? "IoTeam User"
+    }
+    
+    private var displayEmail: String {
+        sessionStore.currentUser?.email ?? "No email"
     }
 }
 

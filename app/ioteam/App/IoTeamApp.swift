@@ -12,8 +12,16 @@ import SwiftUI
 
 @main
 struct IoTeamApp: App {
+    @UIApplicationDelegateAdaptor(IoTeamAppDelegate.self) private var appDelegate
+
     let sharedContainer: ModelContainer
     let appleSignInUseCase: AppleSignInUseCase
+    let getCurrentUserProfileUseCase: GetCurrentUserProfileUseCase
+    let updateCurrentUserProfileUseCase: UpdateCurrentUserProfileUseCase
+    let createFamilyUseCase: CreateFamilyUseCase
+    let joinFamilyUseCase: JoinFamilyUseCase
+    let completeOnboardingUseCase: CompleteOnboardingUseCase
+    let registerPushTokenUseCase: RegisterPushTokenUseCase
     let deviceRepository: DeviceRepositoryProtocol
     let wiFiProvisioningService: WiFiProvisioningServiceProtocol
     let localeManager: LocaleManager
@@ -23,14 +31,17 @@ struct IoTeamApp: App {
             let schema = Schema([SDDeviceRecord.self])
             let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
             self.sharedContainer = try ModelContainer(for: schema, configurations: [config])
-
-            #if DEBUG
-            let networkClient: APIClientProtocol = MockAPIClient()
-            #else
-            let networkClient = URLSessionAPIClient(baseURLString: "https://yourdomain.com")
-            #endif
+            let networkClient = URLSessionAPIClient(
+                baseURLString: "https://resourceful-generosity-staging.up.railway.app/"
+            )
 
             self.appleSignInUseCase = AppleSignInUseCase(client: networkClient)
+            self.getCurrentUserProfileUseCase = GetCurrentUserProfileUseCase(client: networkClient)
+            self.updateCurrentUserProfileUseCase = UpdateCurrentUserProfileUseCase(client: networkClient)
+            self.createFamilyUseCase = CreateFamilyUseCase(client: networkClient)
+            self.joinFamilyUseCase = JoinFamilyUseCase(client: networkClient)
+            self.completeOnboardingUseCase = CompleteOnboardingUseCase(client: networkClient)
+            self.registerPushTokenUseCase = RegisterPushTokenUseCase(client: networkClient)
             self.deviceRepository = DeviceRepository(
                 modelContainer: sharedContainer,
                 apiClient: networkClient,
@@ -38,6 +49,11 @@ struct IoTeamApp: App {
             )
             self.wiFiProvisioningService = WiFiProvisioningService()
             self.localeManager = LocaleManager()
+            
+            if let accessToken = AppSessionStore.shared.currentSession?.accessToken {
+                URLSessionAPIClient.bootstrapSessionToken(accessToken)
+            }
+            AppNotificationManager.shared.configure(registerPushTokenUseCase: registerPushTokenUseCase)
 
             AppRouter.shared.currentFlow = AppLaunchCoordinator.shared.determineInitialFlow()
         } catch {
@@ -48,8 +64,15 @@ struct IoTeamApp: App {
     var body: some Scene {
         WindowGroup {
             AppRootView()
+                .environment(AppSessionStore.shared)
+                .environment(AppNotificationManager.shared)
                 .environment(localeManager)
                 .environment(\.appleSignInUseCase, appleSignInUseCase)
+                .environment(\.getCurrentUserProfileUseCase, getCurrentUserProfileUseCase)
+                .environment(\.updateCurrentUserProfileUseCase, updateCurrentUserProfileUseCase)
+                .environment(\.createFamilyUseCase, createFamilyUseCase)
+                .environment(\.joinFamilyUseCase, joinFamilyUseCase)
+                .environment(\.completeOnboardingUseCase, completeOnboardingUseCase)
                 .environment(\.deviceRepository, deviceRepository)
                 .environment(\.wiFiProvisioningService, wiFiProvisioningService)
         }
@@ -64,6 +87,26 @@ struct DeviceRepositoryKey: EnvironmentKey {
     @MainActor static let defaultValue: DeviceRepositoryProtocol = FakeDeviceRepository()
 }
 
+struct GetCurrentUserProfileUseCaseKey: EnvironmentKey {
+    @MainActor static let defaultValue: GetCurrentUserProfileUseCase = .init(client: FakeAPI())
+}
+
+struct UpdateCurrentUserProfileUseCaseKey: EnvironmentKey {
+    @MainActor static let defaultValue: UpdateCurrentUserProfileUseCase = .init(client: FakeAPI())
+}
+
+struct CreateFamilyUseCaseKey: EnvironmentKey {
+    @MainActor static let defaultValue: CreateFamilyUseCase = .init(client: FakeAPI())
+}
+
+struct JoinFamilyUseCaseKey: EnvironmentKey {
+    @MainActor static let defaultValue: JoinFamilyUseCase = .init(client: FakeAPI())
+}
+
+struct CompleteOnboardingUseCaseKey: EnvironmentKey {
+    @MainActor static let defaultValue: CompleteOnboardingUseCase = .init(client: FakeAPI())
+}
+
 struct WiFiProvisioningServiceKey: EnvironmentKey {
     @MainActor static let defaultValue: WiFiProvisioningServiceProtocol = FakeWiFiProvisioningService()
 }
@@ -71,6 +114,26 @@ struct WiFiProvisioningServiceKey: EnvironmentKey {
 extension EnvironmentValues {
     var appleSignInUseCase: AppleSignInUseCase {
         get { self[AppleSignInUseCaseKey.self] } set { self[AppleSignInUseCaseKey.self] = newValue }
+    }
+
+    var getCurrentUserProfileUseCase: GetCurrentUserProfileUseCase {
+        get { self[GetCurrentUserProfileUseCaseKey.self] } set { self[GetCurrentUserProfileUseCaseKey.self] = newValue }
+    }
+
+    var updateCurrentUserProfileUseCase: UpdateCurrentUserProfileUseCase {
+        get { self[UpdateCurrentUserProfileUseCaseKey.self] } set { self[UpdateCurrentUserProfileUseCaseKey.self] = newValue }
+    }
+
+    var createFamilyUseCase: CreateFamilyUseCase {
+        get { self[CreateFamilyUseCaseKey.self] } set { self[CreateFamilyUseCaseKey.self] = newValue }
+    }
+
+    var joinFamilyUseCase: JoinFamilyUseCase {
+        get { self[JoinFamilyUseCaseKey.self] } set { self[JoinFamilyUseCaseKey.self] = newValue }
+    }
+
+    var completeOnboardingUseCase: CompleteOnboardingUseCase {
+        get { self[CompleteOnboardingUseCaseKey.self] } set { self[CompleteOnboardingUseCaseKey.self] = newValue }
     }
 
     var deviceRepository: DeviceRepositoryProtocol {
