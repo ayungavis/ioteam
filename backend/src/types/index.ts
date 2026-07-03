@@ -40,3 +40,15 @@ export type DoseLogEventType =
   | "rejected";
 
 export type TakenSource = "device_event" | "manual";
+
+export type PushTokenPlatform = "ios";
+
+// Dose status changes the scheduler drives and notifies on.
+export type DoseTransitionKind = "due" | "missed" | "needs_confirmation";
+
+export interface NotificationPayload {
+  title: string;
+  body: string;
+  // Extra data delivered in the APNS payload for the client to route on.
+  data?: Record<string, string>;
+}

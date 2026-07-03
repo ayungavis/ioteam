@@ -9,6 +9,7 @@ import familyRoutes from "./routes/family.routes";
 import deviceRoutes from "./routes/device.routes";
 import medicineRoutes from "./routes/medicine.routes";
 import doseRoutes from "./routes/dose.routes";
+import notificationRoutes from "./routes/notification.routes";
 import { errorHandler } from "./middleware/error.middleware";
 import swaggerDocument from "./docs/swagger";
 
@@ -30,6 +31,7 @@ app.use("/families", familyRoutes);
 app.use("/devices", deviceRoutes);
 app.use("/medicines", medicineRoutes);
 app.use("/doses", doseRoutes);
+app.use("/notifications", notificationRoutes);
 
 app.use(errorHandler);
 
