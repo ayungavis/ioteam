@@ -1,3 +1,4 @@
+import { Op } from "sequelize";
 import { Family } from "../db/models/Family";
 import { FamilyMember } from "../db/models/FamilyMember";
 import { User } from "../db/models/User";
@@ -23,6 +24,22 @@ export const familyRepository = {
   // Get a single user's membership in any family
   getMembershipByUserId(userId: string) {
     return FamilyMember.findOne({ where: { userId } });
+  },
+
+  // All member user ids across the given families — notification recipients.
+  async getMemberUserIds(familyIds: string[]): Promise<Map<string, string[]>> {
+    const byFamily = new Map<string, string[]>();
+    if (familyIds.length === 0) return byFamily;
+    const members = await FamilyMember.findAll({
+      where: { familyId: { [Op.in]: familyIds } },
+      attributes: ["familyId", "userId"],
+    });
+    for (const m of members) {
+      const list = byFamily.get(m.familyId) ?? [];
+      list.push(m.userId);
+      byFamily.set(m.familyId, list);
+    }
+    return byFamily;
   },
 
   // Get a user's membership in a specific family

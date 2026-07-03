@@ -41,13 +41,13 @@ module.exports = {
       },
       status: {
         type: Sequelize.ENUM(
-          'pending',
-          'due',
-          'taken',
-          'missed',
-          'skipped',
-          'needs_confirmation',
-          'disabled'
+          'pending', //default
+          'due', // before grace minutes
+          'taken', // if already confirm by user = final status
+          'missed', // after grace minutes
+          'skipped', // todo: nice to have, no need for now
+          'needs_confirmation', // if within before-after grace minutes box is opened (record exist in device_event table)
+          'disabled' // deprecated
         ),
         allowNull: false,
         defaultValue: 'pending',
