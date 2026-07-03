@@ -9,13 +9,35 @@ import DesignSystem
 import SwiftUI
 
 struct OnboardingView: View {
+    @State private var animate = false
+
     var body: some View {
-        VStack(spacing: 30) {
-            Spacer()
-            Text("Welcome to Hackathon App! 🚀").font(.largeTitle).bold().multilineTextAlignment(.center)
-            Text("Offline-first synchronization with SwiftData engine configuration ready.").foregroundColor(.secondary).multilineTextAlignment(.center)
-            Spacer()
-            PrimaryButton(title: "Get Started") { AppLaunchCoordinator.shared.completeOnboarding() }
-        }.padding()
+        ZStack {
+            Color.brandSurface
+                .ignoresSafeArea()
+            
+            // Bottle image centered
+            Image("bottle")
+                .resizable()
+                .scaledToFit()
+                .frame(height: 260)
+                .scaleEffect(animate ? 1.0 : 0.85)
+                .opacity(animate ? 1.0 : 0.0)
+                .onAppear {
+                    withAnimation(.easeOut(duration: 0.8)) {
+                        animate = true
+                    }
+                }
+        }
+        .contentShape(Rectangle()) // Makes the whole screen tapable
+        .onTapGesture {
+            AppLaunchCoordinator.shared.completeOnboarding()
+        }
     }
 }
+
+#Preview {
+    OnboardingView()
+}
+
+

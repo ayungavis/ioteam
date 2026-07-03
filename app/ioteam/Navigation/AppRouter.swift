@@ -7,7 +7,7 @@
 
 import SwiftUI
 
-public enum AppFlowState { case onboarding, authentication, dashboard }
+public enum AppFlowState { case onboarding, authentication, profileOnboarding, familySetup, dashboard }
 
 @Observable
 public final class AppRouter {

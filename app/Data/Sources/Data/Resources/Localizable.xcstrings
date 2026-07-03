@@ -18,23 +18,6 @@
         }
       }
     },
-    "Failed to connect to the DoseLatch device." : {
-      "comment" : "Shown when CoreBluetooth fails to connect to the selected peripheral.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Failed to connect to the DoseLatch device."
-          }
-        },
-        "id" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Gagal terhubung ke perangkat DoseLatch."
-          }
-        }
-      }
-    },
     "DoseLatch BLE characteristic is missing." : {
       "comment" : "Shown when the peripheral is missing a required provisioning characteristic.",
       "localizations" : {
@@ -86,6 +69,23 @@
         }
       }
     },
+    "Failed to connect to the DoseLatch device." : {
+      "comment" : "Shown when CoreBluetooth fails to connect to the selected peripheral.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Failed to connect to the DoseLatch device."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gagal terhubung ke perangkat DoseLatch."
+          }
+        }
+      }
+    },
     "The selected DoseLatch device is no longer nearby." : {
       "comment" : "Shown when the selected BLE device disappears before pairing completes.",
       "localizations" : {
@@ -102,6 +102,9 @@
           }
         }
       }
+    },
+    "Wi-Fi join was denied by the user." : {
+      "comment" : "Shown when the system hotspot prompt is denied."
     }
   },
   "version" : "1.0"
