@@ -6,6 +6,7 @@
 //
 
 import Data
+import Domain
 import SwiftUI
 
 @Observable
@@ -15,7 +16,7 @@ public final class AppLaunchCoordinator {
     
     @MainActor func determineInitialFlow() -> AppFlowState {
         if !UserDefaults.standard.bool(forKey: "hasCompletedOnboarding") { return .onboarding }
-        if !UserDefaults.standard.bool(forKey: "userIsAuthenticated") { return .authentication }
+        if !AppSessionStore.shared.isAuthenticated { return .authentication }
         if !UserDefaults.standard.bool(forKey: "hasCompletedProfileOnboarding") { return .profileOnboarding }
         if !UserDefaults.standard.bool(forKey: "hasCompletedFamilySetup") { return .familySetup }
         return .dashboard
@@ -26,7 +27,8 @@ public final class AppLaunchCoordinator {
         AppRouter.shared.changeFlow(to: .authentication)
     }
 
-    @MainActor func loginSuccess() {
+    @MainActor func loginSuccess(session: AuthSession) {
+        AppSessionStore.shared.save(session: session)
         UserDefaults.standard.set(true, forKey: "userIsAuthenticated")
         if !UserDefaults.standard.bool(forKey: "hasCompletedProfileOnboarding") {
             AppRouter.shared.changeFlow(to: .profileOnboarding)
@@ -48,7 +50,16 @@ public final class AppLaunchCoordinator {
     }
 
     @MainActor
+    func syncCompletedOnboardingFromBackend() {
+        AppSessionStore.shared.markOnboardingCompleted()
+        UserDefaults.standard.set(true, forKey: "hasCompletedProfileOnboarding")
+        UserDefaults.standard.set(true, forKey: "hasCompletedFamilySetup")
+        AppRouter.shared.changeFlow(to: .dashboard)
+    }
+
+    @MainActor
     func logout() {
+        AppSessionStore.shared.clear()
         UserDefaults.standard.set(false, forKey: "userIsAuthenticated")
         UserDefaults.standard.set(false, forKey: "hasCompletedProfileOnboarding")
         UserDefaults.standard.set(false, forKey: "hasCompletedFamilySetup")

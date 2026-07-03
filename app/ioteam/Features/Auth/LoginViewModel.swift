@@ -21,22 +21,22 @@ public final class LoginViewModel {
     }
     
     @MainActor
-    public func processAppleAuthentication(token: String, userId: String) async {
+    public func processAppleAuthentication(token: String, fullName: String?) async {
         isAuthenticating = true
         loginErrorMessage = nil
         
         do {
             // Exchange the Apple token with your backend API server
-            let sessionTokenPayload = try await appleSignInUseCase.execute(
+            let session = try await appleSignInUseCase.execute(
                 identityToken: token,
-                userIdentifier: userId
+                fullName: fullName
             )
             
             // HTTP INTERCEPTOR HOOK: Save token to intercept future API requests
-            await URLSessionAPIClient.updateSessionToken(sessionTokenPayload.accessToken)
+            await URLSessionAPIClient.updateSessionToken(session.accessToken)
+            AppLaunchCoordinator.shared.loginSuccess(session: session)
+            await AppNotificationManager.shared.requestAuthorizationAfterLogin()
             
-            // Move the user directly to the app dashboard
-            AppLaunchCoordinator.shared.loginSuccess()
             isAuthenticating = false
         } catch {
             loginErrorMessage = error.localizedDescription

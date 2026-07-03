@@ -8,12 +8,53 @@ import Foundation
 
         private var devices: [UUID: DeviceSummary] = [:]
         private let familyID = "mock-family-default"
+        private var currentUser = AuthenticatedUser(
+            id: UUID().uuidString,
+            email: "mock.user@ioteam.app",
+            fullName: "Mock User",
+            dateOfBirth: nil,
+            onboardingCompleted: false
+        )
 
         func createPairingToken() -> PairingTokenResponse {
             PairingTokenResponse(
                 pairingToken: "pair-\(UUID().uuidString.lowercased())",
                 familyId: familyID
             )
+        }
+
+        func getCurrentUser() -> AuthenticatedUser {
+            currentUser
+        }
+
+        func updateCurrentUser(fullName: String, dateOfBirth: String) -> AuthenticatedUser {
+            currentUser = AuthenticatedUser(
+                id: currentUser.id,
+                email: currentUser.email,
+                fullName: fullName,
+                dateOfBirth: dateOfBirth,
+                onboardingCompleted: currentUser.onboardingCompleted
+            )
+            return currentUser
+        }
+
+        func completeOnboarding() -> OnboardingCompletion {
+            currentUser = AuthenticatedUser(
+                id: currentUser.id,
+                email: currentUser.email,
+                fullName: currentUser.fullName,
+                dateOfBirth: currentUser.dateOfBirth,
+                onboardingCompleted: true
+            )
+            return OnboardingCompletion(id: currentUser.id, onboardingCompleted: true)
+        }
+
+        func createFamily(name: String) -> FamilySummary {
+            FamilySummary(id: UUID().uuidString, name: name, inviteCode: "ABC123")
+        }
+
+        func joinFamily(inviteCode: String) -> FamilySummary {
+            FamilySummary(id: UUID().uuidString, name: "Joined Family", inviteCode: inviteCode)
         }
 
         func registerDevice(
@@ -51,7 +92,7 @@ import Foundation
             status: DeviceStatus?
         ) throws -> DeviceSummary {
             guard var device = devices[deviceID] else {
-                throw NetworkError.badResponse(statusCode: 404)
+                throw NetworkError.badResponse(statusCode: 404, message: nil)
             }
 
             if let name, name.caseInsensitiveCompare(device.name) != .orderedSame {
@@ -71,7 +112,7 @@ import Foundation
 
         func deleteDevice(deviceID: UUID) throws -> DeviceSummary {
             guard let removed = devices.removeValue(forKey: deviceID) else {
-                throw NetworkError.badResponse(statusCode: 404)
+                throw NetworkError.badResponse(statusCode: 404, message: nil)
             }
             return removed
         }
@@ -83,16 +124,116 @@ import Foundation
         public func request<T: Decodable>(_ endpoint: APIEndpoint) async throws -> T {
             try await Task.sleep(for: .milliseconds(800))
 
+            if let onboardingResponse: T = try await handleOnboardingRequest(endpoint: endpoint) {
+                return onboardingResponse
+            }
+
+            if let notificationResponse: T = try await handleNotificationRequest(endpoint: endpoint) {
+                return notificationResponse
+            }
+
+            if let deviceResponse: T = try await handleDeviceRequest(endpoint: endpoint) {
+                return deviceResponse
+            }
+
+            throw NetworkError.invalidURL
+        }
+
+        private func parseJSONObject(from body: Data?) throws -> [String: Any] {
+            guard let body,
+                  let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+            else {
+                throw NetworkError.decodingFailed
+            }
+            return json
+        }
+
+        private func castResult<T: Decodable>(_ value: some Decodable) throws -> T {
+            guard let result = value as? T else {
+                throw NetworkError.decodingFailed
+            }
+            return result
+        }
+
+        private func handleOnboardingRequest<T: Decodable>(endpoint: APIEndpoint) async throws -> T? {
             switch (endpoint.path, endpoint.method) {
             case ("auth/apple", .post):
-                let userId = parseUserId(from: endpoint.body)
-                let token = AuthToken(accessToken: "mock-token-abc123", userId: userId)
-                guard let result = token as? T else { throw NetworkError.decodingFailed }
-                return result
+                let response = AuthSessionResponse(
+                    success: true,
+                    data: AuthSession(
+                        accessToken: "mock-token-abc123",
+                        user: await MockDeviceBackend.shared.getCurrentUser()
+                    )
+                )
+                return try castResult(response)
+            case ("me", .get):
+                let response = UserProfileResponse(
+                    success: true,
+                    data: await MockDeviceBackend.shared.getCurrentUser()
+                )
+                return try castResult(response)
+            case ("me", .patch):
+                let payload = try parseJSONObject(from: endpoint.body)
+                guard let fullName = payload["fullName"] as? String,
+                      let dateOfBirth = payload["dateOfBirth"] as? String
+                else {
+                    throw NetworkError.decodingFailed
+                }
+                let response = UserProfileResponse(
+                    success: true,
+                    data: await MockDeviceBackend.shared.updateCurrentUser(
+                        fullName: fullName,
+                        dateOfBirth: dateOfBirth
+                    )
+                )
+                return try castResult(response)
+            case ("families", .post):
+                let payload = try parseJSONObject(from: endpoint.body)
+                guard let name = payload["name"] as? String else {
+                    throw NetworkError.decodingFailed
+                }
+                let response = FamilySummaryResponse(
+                    success: true,
+                    data: await MockDeviceBackend.shared.createFamily(name: name)
+                )
+                return try castResult(response)
+            case ("families/join", .post):
+                let payload = try parseJSONObject(from: endpoint.body)
+                guard let inviteCode = payload["inviteCode"] as? String else {
+                    throw NetworkError.decodingFailed
+                }
+                let response = FamilySummaryResponse(
+                    success: true,
+                    data: await MockDeviceBackend.shared.joinFamily(inviteCode: inviteCode)
+                )
+                return try castResult(response)
+            case ("onboarding/complete", .post):
+                let response = OnboardingCompletionResponse(
+                    success: true,
+                    data: await MockDeviceBackend.shared.completeOnboarding()
+                )
+                return try castResult(response)
+            default:
+                return nil
+            }
+        }
+
+        private func handleNotificationRequest<T: Decodable>(endpoint: APIEndpoint) async throws -> T? {
+            guard endpoint.path == "notifications/tokens", endpoint.method == .post else {
+                return nil
+            }
+            let response = PushTokenRegistrationResponse(
+                success: true,
+                data: PushTokenRegistration(id: UUID().uuidString)
+            )
+            return try castResult(response)
+        }
+
+        private func handleDeviceRequest<T: Decodable>(endpoint: APIEndpoint) async throws -> T? {
+            switch (endpoint.path, endpoint.method) {
             case ("devices/pairing-token", .post):
                 let response = await MockDeviceBackend.shared.createPairingToken()
-                guard let result = response as? T else { throw NetworkError.decodingFailed }
-                return result
+                return try castResult(response)
             case ("devices/register", .post):
                 let payload = try parseJSONObject(from: endpoint.body)
                 guard let deviceID = UUID(uuidString: payload["device_id"] as? String ?? ""),
@@ -109,36 +250,16 @@ import Foundation
                     deviceName: deviceName,
                     firmwareVersion: firmwareVersion
                 )
-                guard let result = response as? T else { throw NetworkError.decodingFailed }
-                return result
+                return try castResult(response)
             case ("devices", .get):
                 let response = await MockDeviceBackend.shared.listDevices()
-                guard let result = response as? T else { throw NetworkError.decodingFailed }
-                return result
+                return try castResult(response)
             default:
                 if endpoint.path.hasPrefix("devices/") {
                     return try await handleDeviceMutation(endpoint: endpoint)
                 }
-                throw NetworkError.invalidURL
+                return nil
             }
-        }
-
-        private func parseUserId(from body: Data?) -> String {
-            guard let body,
-                  let json = try? JSONSerialization.jsonObject(with: body) as? [String: String]
-            else {
-                return UUID().uuidString
-            }
-            return json["user_id"] ?? UUID().uuidString
-        }
-
-        private func parseJSONObject(from body: Data?) throws -> [String: Any] {
-            guard let body,
-                  let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
-            else {
-                throw NetworkError.decodingFailed
-            }
-            return json
         }
 
         private func handleDeviceMutation<T: Decodable>(endpoint: APIEndpoint) async throws -> T {

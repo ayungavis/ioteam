@@ -1,16 +1,12 @@
 import DesignSystem
+import Domain
 import SwiftUI
 
 struct FamilySetupView: View {
-    @State private var familyName: String = ""
-    @State private var familyCode: String = ""
+    @State private var viewModel: FamilySetupViewModel
 
-    var isCreateFamilyValid: Bool {
-        !familyName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
-    var isJoinFamilyValid: Bool {
-        !familyCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    init(viewModel: FamilySetupViewModel) {
+        _viewModel = State(initialValue: viewModel)
     }
 
     var body: some View {
@@ -22,7 +18,7 @@ struct FamilySetupView: View {
                 VStack(spacing: 0) {
                     Text("Family Setup")
                         .font(.system(size: 18, weight: .medium))
-                        .foregroundColor(.brandTextPrimary)
+                        .foregroundStyle(Color.brandTextPrimary)
                         .padding(.top, 16)
 
                     Image("family-logo")
@@ -34,36 +30,8 @@ struct FamilySetupView: View {
                         .padding(.bottom, 32)
 
                     VStack(alignment: .leading, spacing: 24) {
-                        // MARK: - Create Family Section
-                        VStack(alignment: .leading, spacing: 24) {
-                            Text("Create Family")
-                                .font(.system(size: 28, weight: .bold))
-                                .foregroundColor(.brandTextPrimary)
+                        CreateFamilySection(viewModel: viewModel)
 
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Family Name")
-                                    .font(.system(size: 16, weight: .medium))
-                                    .foregroundColor(.brandTextPrimary)
-
-                                TextField("Enter Name", text: $familyName)
-                                    .font(.system(size: 16))
-                                    .foregroundColor(.brandTextPrimary)
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 14)
-                                    .background(Color.brandCard)
-                                    .cornerRadius(12)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 12)
-                                            .stroke(Color.brandBorder, lineWidth: 1)
-                                    )
-                            }
-
-                            PrimaryButton("Continue", isValid: isCreateFamilyValid, icon: .arrow) {
-                                AppLaunchCoordinator.shared.completeFamilySetup()
-                            }
-                        }
-
-                        // MARK: - Divider
                         HStack(spacing: 16) {
                             Rectangle()
                                 .fill(Color.brandBorder)
@@ -71,7 +39,7 @@ struct FamilySetupView: View {
 
                             Text("or")
                                 .font(.system(size: 14))
-                                .foregroundColor(Color.brandTextTertiary)
+                                .foregroundStyle(Color.brandTextTertiary)
 
                             Rectangle()
                                 .fill(Color.brandBorder)
@@ -79,33 +47,13 @@ struct FamilySetupView: View {
                         }
                         .padding(.vertical, 8)
 
-                        // MARK: - Join Family Section
-                        VStack(alignment: .leading, spacing: 24) {
-                            Text("Join Family")
-                                .font(.system(size: 28, weight: .bold))
-                                .foregroundColor(.brandTextPrimary)
+                        JoinFamilySection(viewModel: viewModel)
 
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Family Code")
-                                    .font(.system(size: 16, weight: .medium))
-                                    .foregroundColor(.brandTextPrimary)
-
-                                TextField("Enter Code", text: $familyCode)
-                                    .font(.system(size: 16))
-                                    .foregroundColor(.brandTextPrimary)
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 14)
-                                    .background(Color.brandCard)
-                                    .cornerRadius(12)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 12)
-                                            .stroke(Color.brandBorder, lineWidth: 1)
-                                    )
-                            }
-
-                            PrimaryButton("Continue", isValid: isJoinFamilyValid, icon: .arrow) {
-                                AppLaunchCoordinator.shared.completeFamilySetup()
-                            }
+                        if let errorMessage = viewModel.errorMessage {
+                            Text(errorMessage)
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundStyle(.red)
+                                .multilineTextAlignment(.leading)
                         }
                     }
                     .padding(.horizontal, 24)
@@ -116,6 +64,68 @@ struct FamilySetupView: View {
     }
 }
 
+private struct CreateFamilySection: View {
+    @Bindable var viewModel: FamilySetupViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            Text("Create Family")
+                .font(.system(size: 28, weight: .bold))
+                .foregroundStyle(Color.brandTextPrimary)
+
+            ProfileTextField(
+                title: "Family Name",
+                placeholder: "Enter Name",
+                text: $viewModel.familyName
+            )
+            .textInputAutocapitalization(.words)
+
+            PrimaryButton(
+                "Continue",
+                isValid: viewModel.isCreateFamilyValid,
+                isLoading: viewModel.isCreatingFamily,
+                icon: .arrow
+            ) {
+                Task { await viewModel.createFamily() }
+            }
+        }
+    }
+}
+
+private struct JoinFamilySection: View {
+    @Bindable var viewModel: FamilySetupViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            Text("Join Family")
+                .font(.system(size: 28, weight: .bold))
+                .foregroundStyle(Color.brandTextPrimary)
+
+            ProfileTextField(
+                title: "Family Code",
+                placeholder: "Enter Code",
+                text: $viewModel.familyCode
+            )
+            .textInputAutocapitalization(.characters)
+
+            PrimaryButton(
+                "Continue",
+                isValid: viewModel.isJoinFamilyValid,
+                isLoading: viewModel.isJoiningFamily,
+                icon: .arrow
+            ) {
+                Task { await viewModel.joinFamily() }
+            }
+        }
+    }
+}
+
 #Preview {
-    FamilySetupView()
+    FamilySetupView(
+        viewModel: FamilySetupViewModel(
+            createFamilyUseCase: CreateFamilyUseCase(client: MockAPIClient()),
+            joinFamilyUseCase: JoinFamilyUseCase(client: MockAPIClient()),
+            completeOnboardingUseCase: CompleteOnboardingUseCase(client: MockAPIClient())
+        )
+    )
 }

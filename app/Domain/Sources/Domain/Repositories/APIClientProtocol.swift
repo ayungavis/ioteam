@@ -36,6 +36,19 @@ public enum HTTPMethod: String {
 public enum NetworkError: Error, LocalizedError, Sendable, Equatable {
     case invalidURL
     case decodingFailed
-    case unauthorized
-    case badResponse(statusCode: Int)
+    case unauthorized(message: String?)
+    case badResponse(statusCode: Int, message: String?)
+
+    public var errorDescription: String? {
+        switch self {
+        case .invalidURL:
+            return "The request URL is invalid."
+        case .decodingFailed:
+            return "Failed to decode the server response."
+        case .unauthorized(let message):
+            return message ?? "Unauthorized."
+        case .badResponse(_, let message):
+            return message ?? "The server returned an unexpected response."
+        }
+    }
 }

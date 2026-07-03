@@ -8,20 +8,36 @@
 import Domain
 import Foundation
 
-private actor AuthCredentialStore {
+private struct APIErrorResponse: Decodable {
+    let error: String?
+    let message: String?
+}
+
+private final class AuthCredentialStore: @unchecked Sendable {
     static let shared = AuthCredentialStore()
+    
+    private let lock = NSLock()
     private var activeBearerToken: String?
     
+    private init() {}
+    
     func saveToken(_ token: String) {
+        lock.lock()
         activeBearerToken = token
+        lock.unlock()
     }
     
     func getToken() -> String? {
-        return activeBearerToken
+        lock.lock()
+        let token = activeBearerToken
+        lock.unlock()
+        return token
     }
     
     func clearToken() {
+        lock.lock()
         activeBearerToken = nil
+        lock.unlock()
     }
 }
 
@@ -39,12 +55,16 @@ public final class URLSessionAPIClient: APIClientProtocol {
     
     /// Global token updater method exposed for login flows to store incoming sessions
     public static func updateSessionToken(_ token: String) async {
-        await AuthCredentialStore.shared.saveToken(token)
+        AuthCredentialStore.shared.saveToken(token)
     }
     
     /// Global session flusher method exposed for sign-out flows
     public static func clearSessionToken() async {
-        await AuthCredentialStore.shared.clearToken()
+        AuthCredentialStore.shared.clearToken()
+    }
+    
+    public static func bootstrapSessionToken(_ token: String) {
+        AuthCredentialStore.shared.saveToken(token)
     }
     
     public func request<T: Decodable>(_ endpoint: APIEndpoint) async throws -> T {
@@ -63,7 +83,7 @@ public final class URLSessionAPIClient: APIClientProtocol {
         
         // AUTOMATIC BEARER TOKEN INTERCEPTION LAYER
         // Reads token securely without stalling or blocking parallel concurrent background threads
-        if let token = await AuthCredentialStore.shared.getToken() {
+        if let token = AuthCredentialStore.shared.getToken() {
             urlRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
         
@@ -71,7 +91,7 @@ public final class URLSessionAPIClient: APIClientProtocol {
         let (data, response) = try await session.data(for: urlRequest)
         
         guard let httpResponse = response as? HTTPURLResponse else {
-            throw NetworkError.badResponse(statusCode: 0)
+            throw NetworkError.badResponse(statusCode: 0, message: nil)
         }
         
         // Inspect Server Verification Handshakes
@@ -93,11 +113,21 @@ public final class URLSessionAPIClient: APIClientProtocol {
             
         case 401:
             // Wipe the runtime session memory token clean
-            await AuthCredentialStore.shared.clearToken()
-            throw NetworkError.unauthorized
+            AuthCredentialStore.shared.clearToken()
+            throw NetworkError.unauthorized(message: decodeErrorMessage(from: data))
 
         default:
-            throw NetworkError.badResponse(statusCode: httpResponse.statusCode)
+            throw NetworkError.badResponse(
+                statusCode: httpResponse.statusCode,
+                message: decodeErrorMessage(from: data)
+            )
         }
+    }
+
+    private func decodeErrorMessage(from data: Data) -> String? {
+        guard let response = try? JSONDecoder().decode(APIErrorResponse.self, from: data) else {
+            return nil
+        }
+        return response.error ?? response.message
     }
 }
