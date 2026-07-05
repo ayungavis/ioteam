@@ -1,0 +1,38 @@
+import DesignSystem
+import SwiftUI
+
+struct SettingsView: View {
+    @State private var doseReminders = true
+    @State private var missedAlerts = true
+    @State private var familyActivity = false
+    @State private var darkMode = false
+    @State private var faceID = false
+    @State private var passcode = false
+
+    var body: some View {
+        ZStack { Color.brandSurface.ignoresSafeArea()
+            Form {
+                Section("Notifications") {
+                    Toggle("Dose reminders", isOn: $doseReminders).tint(Color.brandAccent)
+                    Toggle("Missed dose alerts", isOn: $missedAlerts).tint(Color.brandAccent)
+                    Toggle("Family activity", isOn: $familyActivity).tint(Color.brandAccent)
+                }
+
+                Section("Appearance") {
+                    Picker("Theme", selection: $darkMode) {
+                        Text("Light").tag(false)
+                        Text("Dark").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                }
+
+                Section("Security") {
+                    Toggle("Face ID", isOn: $faceID).tint(Color.brandAccent)
+                    Toggle("Passcode", isOn: $passcode).tint(Color.brandAccent)
+                }
+            }
+            .scrollContentBackground(.hidden)
+            .navigationTitle("Settings")
+        }
+    }
+}
