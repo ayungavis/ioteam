@@ -166,8 +166,20 @@ private struct AddMedicineForm: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Times of Day").font(.system(size: 13)).foregroundColor(.brandTextSecondary)
                 ForEach($viewModel.dailyTimes, id: \.self) { $time in
-                    DatePicker("Time", selection: $time, displayedComponents: .hourAndMinute)
-                        .tint(Color.brandAccent)
+                    HStack {
+                        DatePicker("Time", selection: $time, displayedComponents: .hourAndMinute)
+                            .tint(Color.brandAccent)
+                        if viewModel.dailyTimes.count > 1 {
+                            Button {
+                                if let idx = viewModel.dailyTimes.firstIndex(of: time) {
+                                    viewModel.dailyTimes.remove(at: idx)
+                                }
+                            } label: {
+                                Image(systemName: "minus.circle.fill")
+                                    .foregroundColor(.red).font(.system(size: 18))
+                            }
+                        }
+                    }
                 }
                 Button {
                     viewModel.dailyTimes.append(Date())

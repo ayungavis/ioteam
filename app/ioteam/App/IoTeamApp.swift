@@ -28,6 +28,9 @@ struct IoTeamApp: App {
     let createMedicineUseCase: CreateMedicineUseCase
     let getMedicineDosesUseCase: GetMedicineDosesUseCase
     let markDoseTakenUseCase: MarkDoseTakenUseCase
+    let getCurrentFamilyUseCase: GetCurrentFamilyUseCase
+    let refreshInviteCodeUseCase: RefreshInviteCodeUseCase
+    let removeMemberUseCase: RemoveMemberUseCase
     let deviceRepository: DeviceRepositoryProtocol
     let wiFiProvisioningService: WiFiProvisioningServiceProtocol
     let localeManager: LocaleManager
@@ -54,6 +57,9 @@ struct IoTeamApp: App {
             self.createMedicineUseCase = CreateMedicineUseCase(client: networkClient)
             self.getMedicineDosesUseCase = GetMedicineDosesUseCase(client: networkClient)
             self.markDoseTakenUseCase = MarkDoseTakenUseCase(client: networkClient)
+            self.getCurrentFamilyUseCase = GetCurrentFamilyUseCase(client: networkClient)
+            self.refreshInviteCodeUseCase = RefreshInviteCodeUseCase(client: networkClient)
+            self.removeMemberUseCase = RemoveMemberUseCase(client: networkClient)
             self.deviceRepository = DeviceRepository(
                 modelContainer: sharedContainer,
                 apiClient: networkClient,
@@ -91,6 +97,9 @@ struct IoTeamApp: App {
                 .environment(\.createMedicineUseCase, createMedicineUseCase)
                 .environment(\.getMedicineDosesUseCase, getMedicineDosesUseCase)
                 .environment(\.markDoseTakenUseCase, markDoseTakenUseCase)
+                .environment(\.getCurrentFamilyUseCase, getCurrentFamilyUseCase)
+                .environment(\.refreshInviteCodeUseCase, refreshInviteCodeUseCase)
+                .environment(\.removeMemberUseCase, removeMemberUseCase)
                 .environment(\.deviceRepository, deviceRepository)
                 .environment(\.wiFiProvisioningService, wiFiProvisioningService)
         }
@@ -149,6 +158,18 @@ struct MarkDoseTakenUseCaseKey: EnvironmentKey {
     @MainActor static let defaultValue: MarkDoseTakenUseCase = .init(client: FakeAPI())
 }
 
+struct GetCurrentFamilyUseCaseKey: EnvironmentKey {
+    @MainActor static let defaultValue: GetCurrentFamilyUseCase = .init(client: FakeAPI())
+}
+
+struct RefreshInviteCodeUseCaseKey: EnvironmentKey {
+    @MainActor static let defaultValue: RefreshInviteCodeUseCase = .init(client: FakeAPI())
+}
+
+struct RemoveMemberUseCaseKey: EnvironmentKey {
+    @MainActor static let defaultValue: RemoveMemberUseCase = .init(client: FakeAPI())
+}
+
 struct WiFiProvisioningServiceKey: EnvironmentKey {
     @MainActor static let defaultValue: WiFiProvisioningServiceProtocol = FakeWiFiProvisioningService()
 }
@@ -200,6 +221,18 @@ extension EnvironmentValues {
 
     var markDoseTakenUseCase: MarkDoseTakenUseCase {
         get { self[MarkDoseTakenUseCaseKey.self] } set { self[MarkDoseTakenUseCaseKey.self] = newValue }
+    }
+
+    var getCurrentFamilyUseCase: GetCurrentFamilyUseCase {
+        get { self[GetCurrentFamilyUseCaseKey.self] } set { self[GetCurrentFamilyUseCaseKey.self] = newValue }
+    }
+
+    var refreshInviteCodeUseCase: RefreshInviteCodeUseCase {
+        get { self[RefreshInviteCodeUseCaseKey.self] } set { self[RefreshInviteCodeUseCaseKey.self] = newValue }
+    }
+
+    var removeMemberUseCase: RemoveMemberUseCase {
+        get { self[RemoveMemberUseCaseKey.self] } set { self[RemoveMemberUseCaseKey.self] = newValue }
     }
 
     var deviceRepository: DeviceRepositoryProtocol {
