@@ -122,3 +122,90 @@ public enum DoseSource: String, Codable, Sendable, CaseIterable {
         }
     }
 }
+
+// MARK: - Backend DTOs
+
+public enum ScheduleConfig: Codable, Sendable, Equatable {
+    case daily(timesOfDay: [String])
+    case weekly(weekdays: [Int], timesOfDay: [String])
+    case hourly(intervalHours: Int)
+
+    private enum CodingKeys: String, CodingKey { case timesOfDay, weekdays, intervalHours }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        if let times = try? container.decode([String].self, forKey: .timesOfDay), !times.isEmpty,
+           try container.decodeIfPresent([Int].self, forKey: .weekdays) == nil {
+            self = .daily(timesOfDay: times); return
+        }
+        if let wd = try? container.decode([Int].self, forKey: .weekdays),
+           let times = try? container.decode([String].self, forKey: .timesOfDay) {
+            self = .weekly(weekdays: wd, timesOfDay: times); return
+        }
+        if let interval = try? container.decode(Int.self, forKey: .intervalHours) {
+            self = .hourly(intervalHours: interval); return
+        }
+        throw DecodingError.dataCorruptedError(forKey: .timesOfDay, in: container, debugDescription: "Unknown scheduleConfig")
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .daily(let times): try container.encode(times, forKey: .timesOfDay)
+        case .weekly(let wd, let times):
+            try container.encode(wd, forKey: .weekdays)
+            try container.encode(times, forKey: .timesOfDay)
+        case .hourly(let interval): try container.encode(interval, forKey: .intervalHours)
+        }
+    }
+}
+
+public struct ScheduleInput: Codable, Sendable, Equatable {
+    public let frequencyType: MedicineFrequency
+    public let scheduleConfig: ScheduleConfig
+    public let timezone: String
+    public let graceBeforeMinutes: Int
+    public let graceAfterMinutes: Int
+    public let startAt: Date
+    public let endAt: Date?
+
+    public init(frequencyType: MedicineFrequency, scheduleConfig: ScheduleConfig, timezone: String, graceBeforeMinutes: Int, graceAfterMinutes: Int, startAt: Date, endAt: Date? = nil) {
+        self.frequencyType = frequencyType
+        self.scheduleConfig = scheduleConfig
+        self.timezone = timezone
+        self.graceBeforeMinutes = graceBeforeMinutes
+        self.graceAfterMinutes = graceAfterMinutes
+        self.startAt = startAt
+        self.endAt = endAt
+    }
+}
+
+public struct GeneratedDose: Codable, Sendable, Identifiable, Equatable {
+    public let id: UUID?
+    public let scheduledAt: Date
+    public let windowStartAt: Date
+    public let windowEndAt: Date
+    public let doseAmount: Int
+
+    public init(id: UUID? = nil, scheduledAt: Date, windowStartAt: Date, windowEndAt: Date, doseAmount: Int) {
+        self.id = id
+        self.scheduledAt = scheduledAt
+        self.windowStartAt = windowStartAt
+        self.windowEndAt = windowEndAt
+        self.doseAmount = doseAmount
+    }
+}
+
+public struct DoseSummary: Codable, Sendable, Equatable {
+    public let totalDoses: Int
+    public let firstDoseAt: Date?
+    public let lastDoseAt: Date?
+    public let pillsUsed: Int
+
+    public init(totalDoses: Int, firstDoseAt: Date?, lastDoseAt: Date?, pillsUsed: Int) {
+        self.totalDoses = totalDoses
+        self.firstDoseAt = firstDoseAt
+        self.lastDoseAt = lastDoseAt
+        self.pillsUsed = pillsUsed
+    }
+}

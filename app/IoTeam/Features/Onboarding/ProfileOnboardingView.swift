@@ -192,8 +192,12 @@ private struct ReadOnlyField: View {
 #Preview {
     ProfileOnboardingView(
         viewModel: ProfileOnboardingViewModel(
-            getCurrentUserProfileUseCase: GetCurrentUserProfileUseCase(client: MockAPIClient()),
-            updateCurrentUserProfileUseCase: UpdateCurrentUserProfileUseCase(client: MockAPIClient())
+            getCurrentUserProfileUseCase: GetCurrentUserProfileUseCase(client: PreviewAPIClient()),
+            updateCurrentUserProfileUseCase: UpdateCurrentUserProfileUseCase(client: PreviewAPIClient())
         )
     )
+}
+
+private final class PreviewAPIClient: APIClientProtocol {
+    func request<T: Decodable>(_ endpoint: APIEndpoint) async throws -> T { throw NetworkError.invalidURL }
 }

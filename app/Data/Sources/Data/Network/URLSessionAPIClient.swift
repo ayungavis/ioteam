@@ -8,6 +8,22 @@
 import Domain
 import Foundation
 
+nonisolated(unsafe) private let sharedDateFormatter: DateFormatter = {
+    let f = DateFormatter()
+    f.locale = Locale(identifier: "en_US_POSIX")
+    f.timeZone = TimeZone(abbreviation: "UTC")
+    f.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSZ"
+    return f
+}()
+
+/// Returns a JSONDecoder configured for the DoseLatch API (snake_case keys, ISO8601 dates)
+private func makeDecoder() -> JSONDecoder {
+    let decoder = JSONDecoder()
+    decoder.keyDecodingStrategy = .convertFromSnakeCase
+    decoder.dateDecodingStrategy = .formatted(sharedDateFormatter)
+    return decoder
+}
+
 private struct APIErrorResponse: Decodable {
     let error: String?
     let message: String?
@@ -45,12 +61,14 @@ public final class URLSessionAPIClient: APIClientProtocol {
     private let baseURL: URL
     private let session: URLSession
     
-    public init(baseURLString: String, session: URLSession = .shared) {
+    public init(baseURLString: String, session: URLSession? = nil) {
         guard let url = URL(string: baseURLString) else {
             fatalError("Invalid API configuration baseline URL: \(baseURLString)")
         }
         self.baseURL = url
-        self.session = session
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 30
+        self.session = session ?? URLSession(configuration: config)
     }
     
     /// Global token updater method exposed for login flows to store incoming sessions
@@ -66,10 +84,18 @@ public final class URLSessionAPIClient: APIClientProtocol {
     public static func bootstrapSessionToken(_ token: String) {
         AuthCredentialStore.shared.saveToken(token)
     }
-    
+
     public func request<T: Decodable>(_ endpoint: APIEndpoint) async throws -> T {
-        // Build and validate URL target paths safely
-        let fullURL = baseURL.appendingPathComponent(endpoint.path)
+        var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
+        var path = components?.path ?? ""
+        if path.hasSuffix("/") { path = String(path.dropLast()) }
+        components?.path = path + "/\(endpoint.path)"
+        if let queryItems = endpoint.queryItems, !queryItems.isEmpty {
+            components?.queryItems = queryItems
+        }
+        guard let fullURL = components?.url else {
+            throw NetworkError.invalidURL
+        }
         var urlRequest = URLRequest(url: fullURL)
         urlRequest.httpMethod = endpoint.method.rawValue
         urlRequest.httpBody = endpoint.body
@@ -98,17 +124,10 @@ public final class URLSessionAPIClient: APIClientProtocol {
         switch httpResponse.statusCode {
         case 200 ... 299:
             do {
-                let decoder = JSONDecoder()
-                
-                // Convert snake_case API standard automatically to native Swift camelCase
-                decoder.keyDecodingStrategy = .convertFromSnakeCase
-                
-                // Set ISO8601 formatting to decode server timestamps automatically
-                decoder.dateDecodingStrategy = .iso8601
-                
-                return try decoder.decode(T.self, from: data)
+                let response = try makeDecoder().decode(T.self, from: data)
+                return response
             } catch {
-                throw NetworkError.decodingFailed
+                throw NetworkError.decodingFailed(underlying: error.localizedDescription)
             }
             
         case 401:

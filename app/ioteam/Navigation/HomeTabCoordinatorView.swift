@@ -16,6 +16,8 @@ struct HomeTabCoordinatorView: View {
     @State private var tabRouter = HomeTabRouter()
     @Environment(\.deviceRepository) private var deviceRepository
     @Environment(\.wiFiProvisioningService) private var wiFiProvisioningService
+    @Environment(\.getMedicinesUseCase) private var getMedicinesUseCase
+    @Environment(\.getMedicineDosesUseCase) private var getMedicineDosesUseCase
 
     var body: some View {
         let observeDevicesUseCase = ObserveDevicesUseCase(repository: deviceRepository)
@@ -70,15 +72,22 @@ struct HomeTabCoordinatorView: View {
                     .tint(Color.brandAccent)
                     .navigationDestination(for: HomeNavigationDestination.self) { destination in
                         switch destination {
-                        case .medicineDetail(let medicine):
-                            MedicineDetailView(mode: .edit(medicine))
-                        case .deviceDetail:
+                        case .medicineDetail(let medicineID):
+                            MedicineDetailView(mode: .edit(medicineID: medicineID))
+                        default:
                             EmptyView()
                         }
                     }
             }
             .tint(Color.brandAccent)
             .tabItem { Label("Medicine", systemImage: "pills") }.tag(AppTab.medicine)
+
+            NavigationStack(path: $tabRouter.schedulePath) {
+                ScheduleView(viewModel: ScheduleViewModel(getMedicinesUseCase: getMedicinesUseCase, getMedicineDosesUseCase: getMedicineDosesUseCase))
+                    .tint(Color.brandAccent)
+            }
+            .tint(Color.brandAccent)
+            .tabItem { Label("Schedule", systemImage: "calendar") }.tag(AppTab.schedule)
 
             NavigationStack(path: $tabRouter.profilePath) {
                 ProfileView(observeDevicesUseCase: observeDevicesUseCase)

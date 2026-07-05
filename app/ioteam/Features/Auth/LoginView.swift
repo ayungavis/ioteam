@@ -141,5 +141,9 @@ struct LoginView: View {
 }
 
 #Preview {
-    LoginView(viewModel: LoginViewModel(appleSignInUseCase: AppleSignInUseCase(client: MockAPIClient())))
+    LoginView(viewModel: LoginViewModel(appleSignInUseCase: AppleSignInUseCase(client: PreviewAPIClient())))
+}
+
+private final class PreviewAPIClient: APIClientProtocol {
+    func request<T: Decodable>(_ endpoint: APIEndpoint) async throws -> T { throw NetworkError.invalidURL }
 }

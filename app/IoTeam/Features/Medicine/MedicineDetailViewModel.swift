@@ -3,14 +3,19 @@ import SwiftUI
 
 @Observable
 final class MedicineDetailViewModel {
-    enum Mode {
+    enum Mode: Equatable {
         case add
-        case edit(Medicine)
+        case edit(medicineID: String)
+        static func == (lhs: Mode, rhs: Mode) -> Bool {
+            switch (lhs, rhs) {
+            case (.add, .add): return true
+            case (.edit(let left), .edit(let right)): return left == right
+            default: return false
+            }
+        }
     }
 
     var mode: Mode
-
-    // Add mode form fields
     var medicineName = ""
     var selectedDeviceName = ""
     var quantity = 1
@@ -26,95 +31,109 @@ final class MedicineDetailViewModel {
     var graceBeforeMinutes = 15
     var graceAfterMinutes = 30
     var startDate = Date()
-
-    // Edit mode data
-    var doses: [Dose] = []
+    var doses: [DoseItem] = []
     var doseFilter: DoseFilter = .upcoming
+    var isLoadingDoses = false
+    var isGeneratingPreview = false
+    var alertMessage: String?
 
-    var isDeleteConfirmed = false
+    private var previewDosesUseCase: PreviewDosesUseCase?
+    private var createMedicineUseCase: CreateMedicineUseCase?
+    private var getMedicineDosesUseCase: GetMedicineDosesUseCase?
+    private var appSessionStore: AppSessionStore?
 
-    init(mode: Mode) {
+    init(mode: Mode, previewDosesUseCase: PreviewDosesUseCase? = nil, createMedicineUseCase: CreateMedicineUseCase? = nil, getMedicineDosesUseCase: GetMedicineDosesUseCase? = nil, appSessionStore: AppSessionStore? = nil) {
         self.mode = mode
-        if case .edit(let medicine) = mode {
-            self.medicineName = medicine.name
-            self.selectedDeviceName = medicine.linkedDeviceName ?? ""
-            self.quantity = medicine.remainingQuantity
-            self.frequency = medicine.frequency
-            self.graceBeforeMinutes = medicine.graceBeforeMinutes
-            self.graceAfterMinutes = medicine.graceAfterMinutes
-            loadMockDoses(for: medicine)
-        }
+        self.previewDosesUseCase = previewDosesUseCase
+        self.createMedicineUseCase = createMedicineUseCase
+        self.getMedicineDosesUseCase = getMedicineDosesUseCase
+        self.appSessionStore = appSessionStore
+        if case .edit(let id) = mode { loadDoses(medicineId: id) }
     }
 
-    var medicine: Medicine? {
-        if case .edit(let medicine) = mode { return medicine }
-        return nil
+    /// Call from onAppear to inject real use cases without replacing the entire VM
+    func configure(previewDosesUseCase: PreviewDosesUseCase, createMedicineUseCase: CreateMedicineUseCase, getMedicineDosesUseCase: GetMedicineDosesUseCase, appSessionStore: AppSessionStore) {
+        let needsDoseLoad = self.getMedicineDosesUseCase == nil && mode != .add
+        self.previewDosesUseCase = previewDosesUseCase
+        self.createMedicineUseCase = createMedicineUseCase
+        self.getMedicineDosesUseCase = getMedicineDosesUseCase
+        self.appSessionStore = appSessionStore
+        if needsDoseLoad, case .edit(let id) = mode { loadDoses(medicineId: id) }
     }
 
-    var filteredDoses: [Dose] {
+    var canSave: Bool { !medicineName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && quantity > 0 }
+
+    var filteredDoses: [DoseItem] {
         switch doseFilter {
-        case .upcoming:
-            return doses.filter { $0.status == .pending || $0.status == .due }
-        case .taken:
-            return doses.filter { $0.status == .taken }
-        case .missed:
-            return doses.filter { $0.status == .missed }
-        case .needsConfirmation:
-            return doses.filter { $0.status == .needsConfirmation }
+        case .upcoming: return doses.filter { $0.status == "pending" || $0.status == "due" }
+        case .taken: return doses.filter { $0.status == "taken" }
+        case .missed: return doses.filter { $0.status == "missed" }
+        case .needsConfirmation: return doses.filter { $0.status == "needs_confirmation" }
         }
     }
 
-    var canSave: Bool {
-        !medicineName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && quantity > 0
-            && !selectedDeviceName.isEmpty
+    func loadDoses(medicineId: String) {
+        guard let useCase = getMedicineDosesUseCase else { return }
+        isLoadingDoses = true
+        Task {
+            do {
+                let result = try await useCase.execute(medicineId: medicineId)
+                await MainActor.run { doses = result; isLoadingDoses = false }
+            } catch {
+                await MainActor.run { alertMessage = error.localizedDescription; isLoadingDoses = false }
+            }
+        }
     }
 
-    var scheduleSummary: String {
-        if case .edit(let medicine) = mode { return medicine.scheduleTimesText }
+    func previewDoses() async -> (doses: [GeneratedDose], summary: DoseSummary)? {
+        guard let useCase = previewDosesUseCase else { return nil }
+        isGeneratingPreview = true
+        defer { isGeneratingPreview = false }
+        do {
+            let data = try await useCase.execute(quantity: quantity, pillPerDose: 1, schedule: buildScheduleInput())
+            return (data.doses, data.summary)
+        } catch {
+            await MainActor.run { alertMessage = error.localizedDescription }
+            return nil
+        }
+    }
+
+    func createMedicine() async -> Bool {
+        guard let useCase = createMedicineUseCase, let deviceId = appSessionStore?.deviceId else {
+            await MainActor.run { alertMessage = "Device not set up. Complete family setup first." }
+            return false
+        }
+        do {
+            _ = try await useCase.execute(name: medicineName.trimmingCharacters(in: .whitespacesAndNewlines), deviceId: deviceId, quantity: quantity, schedule: buildScheduleInput())
+            return true
+        } catch {
+            await MainActor.run { alertMessage = error.localizedDescription }
+            return false
+        }
+    }
+
+    // MARK: - Schedule Builder
+    private static let weekdayMap: [String: Int] = ["Sunday":0,"Monday":1,"Tuesday":2,"Wednesday":3,"Thursday":4,"Friday":5,"Saturday":6]
+    private func toHHmm(_ date: Date) -> String { let formatter = DateFormatter(); formatter.dateFormat = "HH:mm"; return formatter.string(from: date) }
+
+    func buildScheduleInput() -> ScheduleInput {
+        let config: ScheduleConfig
         switch frequency {
-        case .daily:
-            return dailyTimes.map { $0.formatted(date: .omitted, time: .shortened) }.joined(separator: ", ")
-        case .weekly:
-            let days = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"]
-            let selected = days.filter { weeklyDays.contains($0) }.joined(separator: ", ")
-            let times = weeklyTimes.map { $0.formatted(date: .omitted, time: .shortened) }.joined(separator: ", ")
-            return "\(selected) at \(times)"
-        case .hourly:
-            return "Every \(hourlyInterval) hours"
+        case .daily: config = .daily(timesOfDay: dailyTimes.map { toHHmm($0) })
+        case .weekly: config = .weekly(weekdays: Self.weekdayMap.filter { weeklyDays.contains($0.key) }.values.sorted(), timesOfDay: weeklyTimes.map { toHHmm($0) })
+        case .hourly: config = .hourly(intervalHours: hourlyInterval)
         }
-    }
-
-    private func loadMockDoses(for medicine: Medicine) {
-        let calendar = Calendar.current
-        let now = Date()
-        let medID = medicine.id
-
-        doses = [
-            Dose(id: UUID(), medicineID: medID, scheduledAt: calendar.date(byAdding: .hour, value: 2, to: now)!, status: .pending),
-            Dose(id: UUID(), medicineID: medID, scheduledAt: calendar.date(byAdding: .hour, value: 5, to: now)!, status: .pending),
-            Dose(id: UUID(), medicineID: medID, scheduledAt: calendar.date(byAdding: .hour, value: -3, to: now)!, actualTakenAt: calendar.date(byAdding: .hour, value: -3, to: now), status: .taken),
-            Dose(id: UUID(), medicineID: medID, scheduledAt: calendar.date(byAdding: .hour, value: -8, to: now)!, actualTakenAt: calendar.date(byAdding: .hour, value: -8, to: now), status: .taken),
-            Dose(id: UUID(), medicineID: medID, scheduledAt: calendar.date(byAdding: .hour, value: -14, to: now)!, status: .missed),
-            Dose(id: UUID(), medicineID: medID, scheduledAt: calendar.date(byAdding: .hour, value: -20, to: now)!, actualTakenAt: calendar.date(byAdding: .hour, value: -20, to: now), status: .needsConfirmation, source: .device)
-        ]
+        return ScheduleInput(frequencyType: frequency, scheduleConfig: config, timezone: TimeZone.current.identifier, graceBeforeMinutes: graceBeforeMinutes, graceAfterMinutes: graceAfterMinutes, startAt: startDate, endAt: nil)
     }
 }
 
 enum DoseFilter: String, CaseIterable, Identifiable {
-    case upcoming
-    case taken
-    case missed
-    case needsConfirmation
-
+    case upcoming, taken, missed, needsConfirmation
     var id: String { rawValue }
-
     var displayName: String {
         switch self {
-        case .upcoming: return "Upcoming"
-        case .taken: return "Taken"
-        case .missed: return "Missed"
-        case .needsConfirmation: return "Confirm"
+        case .upcoming: return "Upcoming"; case .taken: return "Taken"
+        case .missed: return "Missed"; case .needsConfirmation: return "Confirm"
         }
     }
 }

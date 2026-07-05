@@ -22,6 +22,12 @@ struct IoTeamApp: App {
     let joinFamilyUseCase: JoinFamilyUseCase
     let completeOnboardingUseCase: CompleteOnboardingUseCase
     let registerPushTokenUseCase: RegisterPushTokenUseCase
+    let registerDeviceUseCase: RegisterDeviceUseCase
+    let getMedicinesUseCase: GetMedicinesUseCase
+    let previewDosesUseCase: PreviewDosesUseCase
+    let createMedicineUseCase: CreateMedicineUseCase
+    let getMedicineDosesUseCase: GetMedicineDosesUseCase
+    let markDoseTakenUseCase: MarkDoseTakenUseCase
     let deviceRepository: DeviceRepositoryProtocol
     let wiFiProvisioningService: WiFiProvisioningServiceProtocol
     let localeManager: LocaleManager
@@ -42,6 +48,12 @@ struct IoTeamApp: App {
             self.joinFamilyUseCase = JoinFamilyUseCase(client: networkClient)
             self.completeOnboardingUseCase = CompleteOnboardingUseCase(client: networkClient)
             self.registerPushTokenUseCase = RegisterPushTokenUseCase(client: networkClient)
+            self.registerDeviceUseCase = RegisterDeviceUseCase(client: networkClient)
+            self.getMedicinesUseCase = GetMedicinesUseCase(client: networkClient)
+            self.previewDosesUseCase = PreviewDosesUseCase(client: networkClient)
+            self.createMedicineUseCase = CreateMedicineUseCase(client: networkClient)
+            self.getMedicineDosesUseCase = GetMedicineDosesUseCase(client: networkClient)
+            self.markDoseTakenUseCase = MarkDoseTakenUseCase(client: networkClient)
             self.deviceRepository = DeviceRepository(
                 modelContainer: sharedContainer,
                 apiClient: networkClient,
@@ -73,6 +85,12 @@ struct IoTeamApp: App {
                 .environment(\.createFamilyUseCase, createFamilyUseCase)
                 .environment(\.joinFamilyUseCase, joinFamilyUseCase)
                 .environment(\.completeOnboardingUseCase, completeOnboardingUseCase)
+                .environment(\.registerDeviceUseCase, registerDeviceUseCase)
+                .environment(\.getMedicinesUseCase, getMedicinesUseCase)
+                .environment(\.previewDosesUseCase, previewDosesUseCase)
+                .environment(\.createMedicineUseCase, createMedicineUseCase)
+                .environment(\.getMedicineDosesUseCase, getMedicineDosesUseCase)
+                .environment(\.markDoseTakenUseCase, markDoseTakenUseCase)
                 .environment(\.deviceRepository, deviceRepository)
                 .environment(\.wiFiProvisioningService, wiFiProvisioningService)
         }
@@ -107,6 +125,30 @@ struct CompleteOnboardingUseCaseKey: EnvironmentKey {
     @MainActor static let defaultValue: CompleteOnboardingUseCase = .init(client: FakeAPI())
 }
 
+struct RegisterDeviceUseCaseKey: EnvironmentKey {
+    @MainActor static let defaultValue: RegisterDeviceUseCase = .init(client: FakeAPI())
+}
+
+struct GetMedicinesUseCaseKey: EnvironmentKey {
+    @MainActor static let defaultValue: GetMedicinesUseCase = .init(client: FakeAPI())
+}
+
+struct PreviewDosesUseCaseKey: EnvironmentKey {
+    @MainActor static let defaultValue: PreviewDosesUseCase = .init(client: FakeAPI())
+}
+
+struct CreateMedicineUseCaseKey: EnvironmentKey {
+    @MainActor static let defaultValue: CreateMedicineUseCase = .init(client: FakeAPI())
+}
+
+struct GetMedicineDosesUseCaseKey: EnvironmentKey {
+    @MainActor static let defaultValue: GetMedicineDosesUseCase = .init(client: FakeAPI())
+}
+
+struct MarkDoseTakenUseCaseKey: EnvironmentKey {
+    @MainActor static let defaultValue: MarkDoseTakenUseCase = .init(client: FakeAPI())
+}
+
 struct WiFiProvisioningServiceKey: EnvironmentKey {
     @MainActor static let defaultValue: WiFiProvisioningServiceProtocol = FakeWiFiProvisioningService()
 }
@@ -134,6 +176,30 @@ extension EnvironmentValues {
 
     var completeOnboardingUseCase: CompleteOnboardingUseCase {
         get { self[CompleteOnboardingUseCaseKey.self] } set { self[CompleteOnboardingUseCaseKey.self] = newValue }
+    }
+
+    var registerDeviceUseCase: RegisterDeviceUseCase {
+        get { self[RegisterDeviceUseCaseKey.self] } set { self[RegisterDeviceUseCaseKey.self] = newValue }
+    }
+
+    var getMedicinesUseCase: GetMedicinesUseCase {
+        get { self[GetMedicinesUseCaseKey.self] } set { self[GetMedicinesUseCaseKey.self] = newValue }
+    }
+
+    var previewDosesUseCase: PreviewDosesUseCase {
+        get { self[PreviewDosesUseCaseKey.self] } set { self[PreviewDosesUseCaseKey.self] = newValue }
+    }
+
+    var createMedicineUseCase: CreateMedicineUseCase {
+        get { self[CreateMedicineUseCaseKey.self] } set { self[CreateMedicineUseCaseKey.self] = newValue }
+    }
+
+    var getMedicineDosesUseCase: GetMedicineDosesUseCase {
+        get { self[GetMedicineDosesUseCaseKey.self] } set { self[GetMedicineDosesUseCaseKey.self] = newValue }
+    }
+
+    var markDoseTakenUseCase: MarkDoseTakenUseCase {
+        get { self[MarkDoseTakenUseCaseKey.self] } set { self[MarkDoseTakenUseCaseKey.self] = newValue }
     }
 
     var deviceRepository: DeviceRepositoryProtocol {

@@ -12,15 +12,18 @@ final class FamilySetupViewModel {
 
     private let createFamilyUseCase: CreateFamilyUseCase
     private let joinFamilyUseCase: JoinFamilyUseCase
+    private let registerDeviceUseCase: RegisterDeviceUseCase
     private let completeOnboardingUseCase: CompleteOnboardingUseCase
 
     init(
         createFamilyUseCase: CreateFamilyUseCase,
         joinFamilyUseCase: JoinFamilyUseCase,
+        registerDeviceUseCase: RegisterDeviceUseCase,
         completeOnboardingUseCase: CompleteOnboardingUseCase
     ) {
         self.createFamilyUseCase = createFamilyUseCase
         self.joinFamilyUseCase = joinFamilyUseCase
+        self.registerDeviceUseCase = registerDeviceUseCase
         self.completeOnboardingUseCase = completeOnboardingUseCase
     }
 
@@ -33,46 +36,34 @@ final class FamilySetupViewModel {
     }
 
     func createFamily() async {
-        guard isCreateFamilyValid else {
-            return
-        }
-
+        guard isCreateFamilyValid else { return }
         isCreatingFamily = true
         errorMessage = nil
-
         do {
-            _ = try await createFamilyUseCase.execute(
-                name: familyName.trimmingCharacters(in: .whitespacesAndNewlines)
-            )
-            try await finishOnboarding()
+            let family = try await createFamilyUseCase.execute(name: familyName.trimmingCharacters(in: .whitespacesAndNewlines))
+            try await finishSetup(familyId: family.id)
         } catch {
             errorMessage = error.localizedDescription
         }
-
         isCreatingFamily = false
     }
 
     func joinFamily() async {
-        guard isJoinFamilyValid else {
-            return
-        }
-
+        guard isJoinFamilyValid else { return }
         isJoiningFamily = true
         errorMessage = nil
-
         do {
-            _ = try await joinFamilyUseCase.execute(
-                inviteCode: familyCode.trimmingCharacters(in: .whitespacesAndNewlines)
-            )
-            try await finishOnboarding()
+            let family = try await joinFamilyUseCase.execute(inviteCode: familyCode.trimmingCharacters(in: .whitespacesAndNewlines))
+            try await finishSetup(familyId: family.id)
         } catch {
             errorMessage = error.localizedDescription
         }
-
         isJoiningFamily = false
     }
 
-    private func finishOnboarding() async throws {
+    private func finishSetup(familyId: String) async throws {
+        let device = try await registerDeviceUseCase.execute(deviceName: "Default Pill Box")
+        AppSessionStore.shared.saveFamilyAndDevice(familyId: familyId, deviceId: device.id, deviceName: device.name)
         let result = try await completeOnboardingUseCase.execute()
         guard result.onboardingCompleted else {
             throw NetworkError.badResponse(statusCode: 200, message: "Could not complete onboarding.")

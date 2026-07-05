@@ -18,6 +18,7 @@ struct AppRootView: View {
     @Environment(\.updateCurrentUserProfileUseCase) private var updateCurrentUserProfileUseCase
     @Environment(\.createFamilyUseCase) private var createFamilyUseCase
     @Environment(\.joinFamilyUseCase) private var joinFamilyUseCase
+    @Environment(\.registerDeviceUseCase) private var registerDeviceUseCase
     @Environment(\.completeOnboardingUseCase) private var completeOnboardingUseCase
 
     var body: some View {
@@ -39,6 +40,7 @@ struct AppRootView: View {
                     viewModel: FamilySetupViewModel(
                         createFamilyUseCase: createFamilyUseCase,
                         joinFamilyUseCase: joinFamilyUseCase,
+                        registerDeviceUseCase: registerDeviceUseCase,
                         completeOnboardingUseCase: completeOnboardingUseCase
                     )
                 )
