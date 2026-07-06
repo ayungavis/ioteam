@@ -27,7 +27,7 @@ public enum DoseStatus: String, Codable, Sendable, CaseIterable {
     case taken
     case missed
     case skipped
-    case needsConfirmation
+    case needsConfirmation = "needs_confirmation"
     case disabled
 
     public var displayName: String {
@@ -181,13 +181,28 @@ public struct ScheduleInput: Codable, Sendable, Equatable {
 }
 
 public struct GeneratedDose: Codable, Sendable, Identifiable, Equatable {
-    public let id: UUID?
+    public let id: UUID
     public let scheduledAt: Date
     public let windowStartAt: Date
     public let windowEndAt: Date
     public let doseAmount: Int
 
-    public init(id: UUID? = nil, scheduledAt: Date, windowStartAt: Date, windowEndAt: Date, doseAmount: Int) {
+    // The backend's GeneratedDose payload carries no id (doses are not yet
+    // persisted), so the id is local-only and excluded from Codable.
+    private enum CodingKeys: String, CodingKey {
+        case scheduledAt, windowStartAt, windowEndAt, doseAmount
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = UUID()
+        self.scheduledAt = try container.decode(Date.self, forKey: .scheduledAt)
+        self.windowStartAt = try container.decode(Date.self, forKey: .windowStartAt)
+        self.windowEndAt = try container.decode(Date.self, forKey: .windowEndAt)
+        self.doseAmount = try container.decode(Int.self, forKey: .doseAmount)
+    }
+
+    public init(id: UUID = UUID(), scheduledAt: Date, windowStartAt: Date, windowEndAt: Date, doseAmount: Int) {
         self.id = id
         self.scheduledAt = scheduledAt
         self.windowStartAt = windowStartAt

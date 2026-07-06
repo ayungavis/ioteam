@@ -9,10 +9,16 @@ final class ScheduleViewModel {
 
     private let getMedicinesUseCase: GetMedicinesUseCase
     private let getMedicineDosesUseCase: GetMedicineDosesUseCase
+    private let markDoseTakenUseCase: MarkDoseTakenUseCase
 
-    init(getMedicinesUseCase: GetMedicinesUseCase, getMedicineDosesUseCase: GetMedicineDosesUseCase) {
+    init(
+        getMedicinesUseCase: GetMedicinesUseCase,
+        getMedicineDosesUseCase: GetMedicineDosesUseCase,
+        markDoseTakenUseCase: MarkDoseTakenUseCase
+    ) {
         self.getMedicinesUseCase = getMedicinesUseCase
         self.getMedicineDosesUseCase = getMedicineDosesUseCase
+        self.markDoseTakenUseCase = markDoseTakenUseCase
     }
 
     func loadDoses() async {
@@ -28,18 +34,18 @@ final class ScheduleViewModel {
                 let statusFilter = ["pending", "due", "taken"]
                 let doseItems = try await getMedicineDosesUseCase.execute(medicineId: medicine.id, statuses: statusFilter)
                 for item in doseItems where item.scheduledAt <= endDate {
-                    let timeStr = Self.timeFormatter.string(from: item.scheduledAt)
-                    let status: Domain.DoseStatus = Domain.DoseStatus(rawValue: item.status) ?? .pending
                     allDoses.append(ScheduleUIDose(
-                        time: timeStr,
+                        id: item.id,
+                        scheduledAt: item.scheduledAt,
+                        time: Self.timeFormatter.string(from: item.scheduledAt),
                         medicineName: medicine.name,
                         deviceName: medicine.device?.name ?? "—",
                         amount: item.doseAmount,
-                        status: status
+                        status: Domain.DoseStatus(rawValue: item.status) ?? .pending
                     ))
                 }
             }
-            doses = allDoses.sorted { $0.time < $1.time }
+            doses = allDoses.sorted { $0.scheduledAt < $1.scheduledAt }
         } catch {
             alertMessage = error.localizedDescription
         }
@@ -47,23 +53,24 @@ final class ScheduleViewModel {
     }
 
     func dosesForDate(_ date: Date) -> [ScheduleUIDose] {
-        doses.filter { dose in
-            guard let doseTime = Self.parseTime(dose.time) else { return false }
-            return Calendar.current.isDate(doseTime, inSameDayAs: date)
-        }
+        doses.filter { Calendar.current.isDate($0.scheduledAt, inSameDayAs: date) }
     }
 
-    func toggleDose(_ dose: ScheduleUIDose) {
+    /// Marks the dose taken on the backend. There is no un-take endpoint, so taken doses stay taken.
+    func markTaken(_ dose: ScheduleUIDose) async {
+        guard dose.status != .taken else { return }
         guard let idx = doses.firstIndex(where: { $0.id == dose.id }) else { return }
-        doses[idx].status = doses[idx].status == .taken ? .pending : .taken
+        let previousStatus = doses[idx].status
+        doses[idx].status = .taken
+        do {
+            _ = try await markDoseTakenUseCase.execute(doseId: dose.id)
+        } catch {
+            doses[idx].status = previousStatus
+            alertMessage = error.localizedDescription
+        }
     }
 
     private static let timeFormatter: DateFormatter = {
         let formatter = DateFormatter(); formatter.dateFormat = "hh:mm a"; return formatter
     }()
-
-    private static func parseTime(_ time: String) -> Date? {
-        let formatter = DateFormatter(); formatter.dateFormat = "hh:mm a"
-        return formatter.date(from: time)
-    }
 }

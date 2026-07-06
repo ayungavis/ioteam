@@ -9,14 +9,20 @@ struct ManageFamilyView: View {
     @Environment(\.registerDeviceUseCase) private var registerDevice
     @Environment(\.refreshInviteCodeUseCase) private var refreshCode
     @Environment(\.removeMemberUseCase) private var removeMember
-    @State private var vm = ManageFamilyViewModel(
-        getCurrentFamilyUseCase: GetCurrentFamilyUseCase(client: FamilyPreviewAPI()),
-        createFamilyUseCase: CreateFamilyUseCase(client: FamilyPreviewAPI()),
-        joinFamilyUseCase: JoinFamilyUseCase(client: FamilyPreviewAPI()),
-        registerDeviceUseCase: RegisterDeviceUseCase(client: FamilyPreviewAPI()),
-        refreshInviteCodeUseCase: RefreshInviteCodeUseCase(client: FamilyPreviewAPI()),
-        removeMemberUseCase: RemoveMemberUseCase(client: FamilyPreviewAPI())
-    )
+    @Environment(\.renameFamilyUseCase) private var renameFamily
+    @Environment(\.getFamilyMembersUseCase) private var getFamilyMembers
+    @State private var vm = ManageFamilyViewModel(useCases: FamilyUseCases(
+        getCurrentFamily: GetCurrentFamilyUseCase(client: FamilyPreviewAPI()),
+        createFamily: CreateFamilyUseCase(client: FamilyPreviewAPI()),
+        joinFamily: JoinFamilyUseCase(client: FamilyPreviewAPI()),
+        registerDevice: RegisterDeviceUseCase(client: FamilyPreviewAPI()),
+        refreshInviteCode: RefreshInviteCodeUseCase(client: FamilyPreviewAPI()),
+        removeMember: RemoveMemberUseCase(client: FamilyPreviewAPI()),
+        renameFamily: RenameFamilyUseCase(client: FamilyPreviewAPI()),
+        getMembers: GetFamilyMembersUseCase(client: FamilyPreviewAPI())
+    ))
+    @State private var isRenamePresented = false
+    @State private var renameText = ""
 
     var body: some View {
         ZStack { Color.brandSurface.ignoresSafeArea()
@@ -30,16 +36,26 @@ struct ManageFamilyView: View {
         }
         .navigationTitle("Manage Family")
         .onAppear {
-            vm = ManageFamilyViewModel(
-                getCurrentFamilyUseCase: getCurrentFamily, createFamilyUseCase: createFamily,
-                joinFamilyUseCase: joinFamily, registerDeviceUseCase: registerDevice,
-                refreshInviteCodeUseCase: refreshCode, removeMemberUseCase: removeMember
-            )
+            vm = ManageFamilyViewModel(useCases: FamilyUseCases(
+                getCurrentFamily: getCurrentFamily,
+                createFamily: createFamily,
+                joinFamily: joinFamily,
+                registerDevice: registerDevice,
+                refreshInviteCode: refreshCode,
+                removeMember: removeMember,
+                renameFamily: renameFamily,
+                getMembers: getFamilyMembers
+            ))
             Task { await vm.loadFamily() }
         }
         .alert("Error", isPresented: Binding(get: { vm.errorMessage != nil }, set: { _ in vm.errorMessage = nil })) {
             Button("OK") {}
         } message: { Text(vm.errorMessage ?? "") }
+        .alert("Rename Family", isPresented: $isRenamePresented) {
+            TextField("Family name", text: $renameText)
+            Button("Cancel", role: .cancel) {}
+            Button("Rename") { Task { await vm.renameFamily(to: renameText) } }
+        } message: { Text("Only owners and admins can rename the family.") }
     }
 
     // MARK: - Has Family
@@ -48,8 +64,25 @@ struct ManageFamilyView: View {
         List {
             if let family = vm.family {
                 Section("Family Info") {
-                    LabeledContent("Name", value: family.name)
-                    LabeledContent("Members", value: "\(family.memberCount)")
+                    HStack {
+                        Text("Name").foregroundColor(.brandTextPrimary)
+                        Spacer()
+                        Text(family.name).foregroundColor(.brandTextSecondary)
+                        if vm.canManageFamily {
+                            if vm.isRenaming {
+                                ProgressView().padding(.leading, 4)
+                            } else {
+                                Button {
+                                    renameText = family.name
+                                    isRenamePresented = true
+                                } label: {
+                                    Image(systemName: "pencil").foregroundColor(.brandAccent).font(.system(size: 14))
+                                }
+                                .buttonStyle(.borderless)
+                            }
+                        }
+                    }
+                    LabeledContent("Members", value: "\(vm.members.count)")
                     LabeledContent("Your Role", value: family.role.capitalized)
                 }
 
@@ -67,7 +100,7 @@ struct ManageFamilyView: View {
                 }
 
                 Section("Members") {
-                    ForEach(family.members) { member in
+                    ForEach(vm.members) { member in
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(member.user.fullName ?? "Unknown")

@@ -7,6 +7,13 @@ struct MedicineDetailView: View {
     @Environment(\.previewDosesUseCase) private var previewDosesUseCase
     @Environment(\.createMedicineUseCase) private var createMedicineUseCase
     @Environment(\.getMedicineDosesUseCase) private var getMedicineDosesUseCase
+    @Environment(\.listFamilyDevicesUseCase) private var listFamilyDevicesUseCase
+    @Environment(\.registerDeviceUseCase) private var registerDeviceUseCase
+    @Environment(\.getMedicineDetailUseCase) private var getMedicineDetailUseCase
+    @Environment(\.updateMedicineUseCase) private var updateMedicineUseCase
+    @Environment(\.deleteMedicineUseCase) private var deleteMedicineUseCase
+    @Environment(\.reschedulePreviewUseCase) private var reschedulePreviewUseCase
+    @Environment(\.rescheduleMedicineUseCase) private var rescheduleMedicineUseCase
     @State private var viewModel: MedicineDetailViewModel
     @State private var isDeleteAlertPresented = false
     @State private var dosePreviewViewModel: DosePreviewViewModel?
@@ -32,12 +39,36 @@ struct MedicineDetailView: View {
                         }
                     })
                 case .edit:
-                    EditMedicineDetail(viewModel: viewModel, onDelete: { dismiss() })
+                    EditMedicineDetail(
+                        viewModel: viewModel,
+                        onSave: { Task { _ = await viewModel.saveChanges() } },
+                        onReviewReschedule: {
+                            Task {
+                                guard let result = await viewModel.previewReschedule() else { return }
+                                dosePreviewViewModel = DosePreviewViewModel(doses: result.doses, summary: result.summary, medicineName: viewModel.medicineName, totalQuantity: viewModel.remainingQuantity, scheduleInput: viewModel.buildScheduleInput(), onConfirm: { Task { _ = await viewModel.applyReschedule() } })
+                            }
+                        },
+                        onDelete: { isDeleteAlertPresented = true }
+                    )
                 }
             }
         }
         .onAppear {
-            viewModel.configure(previewDosesUseCase: previewDosesUseCase, createMedicineUseCase: createMedicineUseCase, getMedicineDosesUseCase: getMedicineDosesUseCase, appSessionStore: AppSessionStore.shared)
+            viewModel.configure(
+                useCases: MedicineDetailUseCases(
+                    previewDoses: previewDosesUseCase,
+                    createMedicine: createMedicineUseCase,
+                    getDoses: getMedicineDosesUseCase,
+                    listFamilyDevices: listFamilyDevicesUseCase,
+                    registerDevice: registerDeviceUseCase,
+                    getDetail: getMedicineDetailUseCase,
+                    update: updateMedicineUseCase,
+                    delete: deleteMedicineUseCase,
+                    reschedulePreview: reschedulePreviewUseCase,
+                    reschedule: rescheduleMedicineUseCase
+                ),
+                appSessionStore: AppSessionStore.shared
+            )
         }
         .onChange(of: viewModel.alertMessage) { _, newValue in
             showErrorAlert = newValue != nil
@@ -47,7 +78,10 @@ struct MedicineDetailView: View {
             Button("OK") { viewModel.alertMessage = nil }
         } message: { Text(viewModel.alertMessage ?? "") }
         .alert("Delete Medicine", isPresented: $isDeleteAlertPresented) {
-            Button("Cancel", role: .cancel) {}; Button("Delete", role: .destructive) { dismiss() }
+            Button("Cancel", role: .cancel) {}
+            Button("Delete", role: .destructive) {
+                Task { if await viewModel.deleteMedicine() { dismiss() } }
+            }
         } message: { Text("This will remove the medicine and stop tracking. This action cannot be undone.") }
     }
 }
@@ -80,18 +114,29 @@ private struct AddMedicineForm: View {
 
             // Quantity
             FormField(label: "Quantity") {
-                Stepper(value: $viewModel.quantity, in: 1...999) {
-                    Text("\(viewModel.quantity) units")
-                        .font(.system(size: 16))
-                        .foregroundColor(.brandTextPrimary)
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 14)
-                .background(Color.brandCard)
-                .cornerRadius(12)
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.brandBorder, lineWidth: 1))
+                QuantityInputField(value: $viewModel.quantity, range: 1...999, unit: "units")
             }
 
+            ScheduleEditorFields(viewModel: viewModel)
+
+            // Save Button
+            PrimaryButton("Review Doses", isValid: viewModel.canSave, isLoading: viewModel.isGeneratingPreview, icon: .arrow) {
+                onReviewDoses()
+            }
+            .padding(.top, 8)
+        }
+        .padding(.horizontal, 24)
+        .padding(.bottom, 40)
+    }
+}
+
+// MARK: - Shared schedule editor (Add + Edit)
+
+private struct ScheduleEditorFields: View {
+    @Bindable var viewModel: MedicineDetailViewModel
+
+    var body: some View {
+        Group {
             // Schedule Type
             FormField(label: "Schedule Type") {
                 Picker("Frequency", selection: $viewModel.frequency) {
@@ -148,15 +193,7 @@ private struct AddMedicineForm: View {
                     .cornerRadius(12)
                     .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.brandBorder, lineWidth: 1))
             }
-
-            // Save Button
-            PrimaryButton("Review Doses", isValid: viewModel.canSave, isLoading: viewModel.isGeneratingPreview, icon: .arrow) {
-                onReviewDoses()
-            }
-            .padding(.top, 8)
         }
-        .padding(.horizontal, 24)
-        .padding(.bottom, 40)
     }
 
     @ViewBuilder
@@ -237,6 +274,8 @@ private struct AddMedicineForm: View {
 
 private struct EditMedicineDetail: View {
     @Bindable var viewModel: MedicineDetailViewModel
+    let onSave: () -> Void
+    let onReviewReschedule: () -> Void
     let onDelete: () -> Void
 
     var body: some View {
@@ -245,6 +284,76 @@ private struct EditMedicineDetail: View {
                 .font(.system(size: 28, weight: .bold))
                 .foregroundColor(.brandTextPrimary)
                 .padding(.top, 24)
+
+            if viewModel.isLoadingDetail {
+                ProgressView().frame(maxWidth: .infinity).padding(.top, 20)
+            } else {
+                // Medicine Name
+                FormField(label: "Medicine Name") {
+                    TextField("Enter medicine name", text: $viewModel.medicineName)
+                        .textInputAutocapitalization(.words)
+                        .formFieldStyle()
+                }
+
+                // Enabled / Disabled
+                FormField(label: "Status") {
+                    Toggle(isOn: Binding(
+                        get: { viewModel.medicineStatus == .active },
+                        set: { viewModel.medicineStatus = $0 ? .active : .disabled }
+                    )) {
+                        Text(viewModel.medicineStatus == .active ? "Enabled" : "Disabled")
+                            .font(.system(size: 16)).foregroundColor(.brandTextPrimary)
+                    }
+                    .tint(Color.brandSuccess)
+                    .padding(.horizontal, 16).padding(.vertical, 14)
+                    .background(Color.brandCard).cornerRadius(12)
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.brandBorder, lineWidth: 1))
+                }
+
+                // Stock
+                FormField(label: "Stock") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Text("Remaining").font(.system(size: 14)).foregroundColor(.brandTextSecondary)
+                            Spacer()
+                            Text("\(viewModel.remainingQuantity) / \(viewModel.totalQuantity)")
+                                .font(.system(size: 15, weight: .medium)).foregroundColor(.brandTextPrimary)
+                        }
+                        Divider()
+                        HStack(spacing: 12) {
+                            Text("Adjust by").font(.system(size: 14)).foregroundColor(.brandTextSecondary)
+                            TextField("0", value: $viewModel.adjustQuantityDelta, format: .number)
+                                .keyboardType(.numbersAndPunctuation)
+                                .font(.system(size: 16))
+                                .foregroundColor(viewModel.adjustQuantityDelta >= 0 ? .brandTextPrimary : .red)
+                                .frame(maxWidth: 70)
+                            Spacer()
+                            Stepper("", value: $viewModel.adjustQuantityDelta, in: -viewModel.remainingQuantity...999).labelsHidden()
+                        }
+                        Text("Positive adds pills (refill), negative removes them.")
+                            .font(.system(size: 12)).foregroundColor(.brandTextTertiary)
+                    }
+                    .padding(16).background(Color.brandCard).cornerRadius(12)
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.brandBorder, lineWidth: 1))
+                }
+
+                PrimaryButton("Save Changes", isValid: viewModel.hasDetailChanges && viewModel.canSave, isLoading: viewModel.isSaving, icon: .checkmark) {
+                    onSave()
+                }
+
+                // Schedule (applied separately via reschedule preview)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Change Schedule")
+                        .font(.system(size: 20, weight: .bold))
+                        .foregroundColor(.brandTextPrimary)
+                    Text("Replaces upcoming doses with a new plan. Past doses are kept.")
+                        .font(.system(size: 13)).foregroundColor(.brandTextSecondary)
+                }
+                ScheduleEditorFields(viewModel: viewModel)
+                PrimaryButton("Review New Schedule", isValid: true, isLoading: viewModel.isGeneratingPreview, icon: .arrow) {
+                    onReviewReschedule()
+                }
+            }
 
             VStack(alignment: .leading, spacing: 12) {
                 Text("Dose History")
@@ -275,6 +384,35 @@ private struct EditMedicineDetail: View {
                     .frame(maxWidth: .infinity).frame(height: 50).background(Color.brandCard).cornerRadius(12)
             }.padding(.top, 8)
         }.padding(.horizontal, 24).padding(.bottom, 40)
+    }
+}
+
+/// Number field with direct keyboard entry plus a stepper for small adjustments.
+private struct QuantityInputField: View {
+    @Binding var value: Int
+    let range: ClosedRange<Int>
+    let unit: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            TextField("0", value: $value, format: .number)
+                .keyboardType(.numberPad)
+                .font(.system(size: 16))
+                .foregroundColor(.brandTextPrimary)
+                .frame(maxWidth: 80)
+            Text(unit).font(.system(size: 14)).foregroundColor(.brandTextSecondary)
+            Spacer()
+            Stepper("", value: $value, in: range).labelsHidden()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .background(Color.brandCard)
+        .cornerRadius(12)
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.brandBorder, lineWidth: 1))
+        .onChange(of: value) { _, newValue in
+            if newValue < range.lowerBound { value = range.lowerBound }
+            if newValue > range.upperBound { value = range.upperBound }
+        }
     }
 }
 

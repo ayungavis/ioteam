@@ -18,6 +18,7 @@ struct HomeTabCoordinatorView: View {
     @Environment(\.wiFiProvisioningService) private var wiFiProvisioningService
     @Environment(\.getMedicinesUseCase) private var getMedicinesUseCase
     @Environment(\.getMedicineDosesUseCase) private var getMedicineDosesUseCase
+    @Environment(\.markDoseTakenUseCase) private var markDoseTakenUseCase
 
     var body: some View {
         let observeDevicesUseCase = ObserveDevicesUseCase(repository: deviceRepository)
@@ -83,7 +84,11 @@ struct HomeTabCoordinatorView: View {
             .tabItem { Label("Medicine", systemImage: "pills") }.tag(AppTab.medicine)
 
             NavigationStack(path: $tabRouter.schedulePath) {
-                ScheduleView(viewModel: ScheduleViewModel(getMedicinesUseCase: getMedicinesUseCase, getMedicineDosesUseCase: getMedicineDosesUseCase))
+                ScheduleView(viewModel: ScheduleViewModel(
+                    getMedicinesUseCase: getMedicinesUseCase,
+                    getMedicineDosesUseCase: getMedicineDosesUseCase,
+                    markDoseTakenUseCase: markDoseTakenUseCase
+                ))
                     .tint(Color.brandAccent)
             }
             .tint(Color.brandAccent)

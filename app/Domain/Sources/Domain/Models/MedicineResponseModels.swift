@@ -13,6 +13,20 @@ public struct RegisteredDevice: Codable, Sendable, Equatable {
     public init(id: String, name: String, hardwareId: String, familyId: String) { self.id = id; self.name = name; self.hardwareId = hardwareId; self.familyId = familyId }
 }
 
+// MARK: - Family device list
+
+public struct FamilyDevice: Codable, Sendable, Equatable, Identifiable {
+    public let id: String; public let familyId: String; public let name: String; public let status: String
+    public init(id: String, familyId: String, name: String, status: String) {
+        self.id = id; self.familyId = familyId; self.name = name; self.status = status
+    }
+}
+
+public struct FamilyDeviceListResponse: Codable, Sendable, Equatable {
+    public let success: Bool; public let data: [FamilyDevice]
+    public init(success: Bool, data: [FamilyDevice]) { self.success = success; self.data = data }
+}
+
 // MARK: - Medicine list
 
 public struct MedicineItem: Codable, Sendable, Equatable, Identifiable {
@@ -81,6 +95,74 @@ public struct ScheduleResponse: Codable, Sendable, Equatable {
         self.id = id; self.frequencyType = frequencyType; self.scheduleConfig = scheduleConfig; self.timezone = timezone
         self.graceBeforeMinutes = graceBeforeMinutes; self.graceAfterMinutes = graceAfterMinutes; self.startAt = startAt; self.endAt = endAt; self.status = status
     }
+}
+
+// MARK: - Medicine detail (GET /medicines/{id})
+
+public struct MedicineDetailData: Codable, Sendable, Equatable, Identifiable {
+    public let id: String; public let name: String; public let status: String
+    public let totalQuantity: Int; public let remainingQuantity: Int; public let pillPerDose: Int
+    public let device: MedicineDeviceSummary?; public let nextDoseAt: Date?
+    public let schedule: ScheduleResponse?; public let doseCounts: [String: Int]?
+    public init(id: String, name: String, status: String, totalQuantity: Int, remainingQuantity: Int, pillPerDose: Int, device: MedicineDeviceSummary?, nextDoseAt: Date?, schedule: ScheduleResponse?, doseCounts: [String: Int]?) {
+        self.id = id; self.name = name; self.status = status; self.totalQuantity = totalQuantity
+        self.remainingQuantity = remainingQuantity; self.pillPerDose = pillPerDose; self.device = device
+        self.nextDoseAt = nextDoseAt; self.schedule = schedule; self.doseCounts = doseCounts
+    }
+}
+
+public struct MedicineDetailResponse: Codable, Sendable, Equatable {
+    public let success: Bool; public let data: MedicineDetailData
+    public init(success: Bool, data: MedicineDetailData) { self.success = success; self.data = data }
+}
+
+// MARK: - Update medicine (PATCH /medicines/{id})
+
+public struct UpdateMedicineRequest: Encodable {
+    public let name: String?; public let status: String?; public let deviceId: String?; public let adjustQuantity: Int?
+    public init(name: String? = nil, status: String? = nil, deviceId: String? = nil, adjustQuantity: Int? = nil) {
+        self.name = name; self.status = status; self.deviceId = deviceId; self.adjustQuantity = adjustQuantity
+    }
+    public var isEmpty: Bool { name == nil && status == nil && deviceId == nil && adjustQuantity == nil }
+}
+
+public struct UpdateMedicineData: Codable, Sendable, Equatable {
+    public let medicine: MedicineItem; public let dosesAdded: Int?; public let dosesRemoved: Int?
+    public init(medicine: MedicineItem, dosesAdded: Int?, dosesRemoved: Int?) {
+        self.medicine = medicine; self.dosesAdded = dosesAdded; self.dosesRemoved = dosesRemoved
+    }
+}
+
+public struct UpdateMedicineResponse: Codable, Sendable, Equatable {
+    public let success: Bool; public let data: UpdateMedicineData
+    public init(success: Bool, data: UpdateMedicineData) { self.success = success; self.data = data }
+}
+
+// MARK: - Delete medicine (DELETE /medicines/{id})
+
+public struct DeleteMedicineData: Codable, Sendable, Equatable {
+    public let dosesRemoved: Int?
+    public init(dosesRemoved: Int?) { self.dosesRemoved = dosesRemoved }
+}
+
+public struct DeleteMedicineResponse: Codable, Sendable, Equatable {
+    public let success: Bool; public let data: DeleteMedicineData
+    public init(success: Bool, data: DeleteMedicineData) { self.success = success; self.data = data }
+}
+
+// MARK: - Reschedule (POST /medicines/{id}/reschedule)
+
+public struct RescheduleData: Codable, Sendable, Equatable {
+    public let schedule: ScheduleResponse; public let doses: [GeneratedDose]
+    public let dosesRemoved: Int?; public let dosesCreated: Int?; public let summary: DoseSummary
+    public init(schedule: ScheduleResponse, doses: [GeneratedDose], dosesRemoved: Int?, dosesCreated: Int?, summary: DoseSummary) {
+        self.schedule = schedule; self.doses = doses; self.dosesRemoved = dosesRemoved; self.dosesCreated = dosesCreated; self.summary = summary
+    }
+}
+
+public struct RescheduleResponse: Codable, Sendable, Equatable {
+    public let success: Bool; public let data: RescheduleData
+    public init(success: Bool, data: RescheduleData) { self.success = success; self.data = data }
 }
 
 // MARK: - Dose list

@@ -103,6 +103,30 @@ public struct FamilyDetailResponse: Codable, Sendable, Equatable {
     public init(success: Bool, data: FamilyDetail) { self.success = success; self.data = data }
 }
 
+/// For endpoints that return only { success: true } (logout, delete account).
+public struct SimpleSuccessResponse: Codable, Sendable, Equatable {
+    public let success: Bool
+    public init(success: Bool) { self.success = success }
+}
+
+public struct FamilyMembersResponse: Codable, Sendable, Equatable {
+    public let success: Bool
+    public let data: [FamilyMember]
+    public init(success: Bool, data: [FamilyMember]) { self.success = success; self.data = data }
+}
+
+public struct RenamedFamily: Codable, Sendable, Equatable {
+    public let id: String
+    public let name: String
+    public init(id: String, name: String) { self.id = id; self.name = name }
+}
+
+public struct RenameFamilyResponse: Codable, Sendable, Equatable {
+    public let success: Bool
+    public let data: RenamedFamily
+    public init(success: Bool, data: RenamedFamily) { self.success = success; self.data = data }
+}
+
 public struct InviteCodeResponse: Codable, Sendable, Equatable {
     public let success: Bool
     public let data: InviteCodeData

@@ -2,7 +2,7 @@ import DesignSystem
 import Domain
 import SwiftUI
 
-struct ScheduleUIDose: Identifiable { let id = UUID(); let time: String; let medicineName: String; let deviceName: String; let amount: Int; var status: Domain.DoseStatus }
+struct ScheduleUIDose: Identifiable { let id: String; let scheduledAt: Date; let time: String; let medicineName: String; let deviceName: String; let amount: Int; var status: Domain.DoseStatus }
 struct DayItem: Identifiable { let id = UUID(); let date: Date; let dayString: String; let dateString: String }
 
 struct ScheduleView: View {
@@ -47,11 +47,9 @@ struct ScheduleView: View {
                                     .frame(maxWidth: .infinity, alignment: .center).padding(.top, 20)
                             } else {
                                 ForEach(todayDoses) { dose in
-                                    DoseTaskRow(
-                                        dose: Binding(get: { dose }, set: { newDose in
-                                            viewModel.toggleDose(dose)
-                                        })
-                                    )
+                                    DoseTaskRow(dose: dose) {
+                                        Task { await viewModel.markTaken(dose) }
+                                    }
                                 }
                             }
                         }
@@ -93,16 +91,17 @@ struct DayStripCell: View {
 }
 
 struct DoseTaskRow: View {
-    @Binding var dose: ScheduleUIDose
+    let dose: ScheduleUIDose
+    let onMarkTaken: () -> Void
     var body: some View {
         HStack(spacing: 16) {
-            Button(action: { dose.status = dose.status == .taken ? .pending : .taken }) {
+            Button(action: onMarkTaken) {
                 ZStack {
                     Circle().stroke(dose.status == .taken ? Color.brandSuccess : Color.brandBorder, lineWidth: 2).frame(width: 28, height: 28)
                     if dose.status == .taken { Circle().fill(Color.brandSuccess).frame(width: 28, height: 28)
                         Image(systemName: "checkmark").font(.system(size: 12, weight: .bold)).foregroundColor(.white) }
                 }
-            }.buttonStyle(.plain)
+            }.buttonStyle(.plain).disabled(dose.status == .taken)
             VStack(alignment: .leading, spacing: 4) {
                 Text(dose.time).font(.system(size: 16, weight: .semibold)).foregroundColor(dose.status == .taken ? Color.brandTextTertiary : .brandTextPrimary)
                 Text(dose.medicineName).font(.system(size: 14)).foregroundColor(dose.status == .taken ? Color.brandTextTertiary : .brandTextPrimary)

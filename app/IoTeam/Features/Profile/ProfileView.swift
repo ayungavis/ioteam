@@ -5,8 +5,10 @@ import SwiftUI
 struct ProfileView: View {
     @Environment(LocaleManager.self) private var localeManager
     @Environment(AppSessionStore.self) private var sessionStore
+    @Environment(\.logoutUseCase) private var logoutUseCase
     let observeDevicesUseCase: ObserveDevicesUseCase
     @State private var deviceCount = 0
+    @State private var isLoggingOut = false
 
     var body: some View {
         @Bindable var bindableLocale = localeManager
@@ -91,9 +93,23 @@ struct ProfileView: View {
 
                         Spacer(minLength: 20)
 
-                        Button(role: .destructive) { AppLaunchCoordinator.shared.logout() } label: {
+                        Button(role: .destructive) {
+                            guard !isLoggingOut else { return }
+                            isLoggingOut = true
+                            Task {
+                                // Best-effort server-side logout; always clear locally so
+                                // a network failure can't leave the user stuck signed in.
+                                try? await logoutUseCase.execute()
+                                AppLaunchCoordinator.shared.logout()
+                                isLoggingOut = false
+                            }
+                        } label: {
                             HStack(spacing: 8) {
-                                Image(systemName: "rectangle.portrait.and.arrow.right")
+                                if isLoggingOut {
+                                    ProgressView().tint(.white)
+                                } else {
+                                    Image(systemName: "rectangle.portrait.and.arrow.right")
+                                }
                                 Text("Logout")
                             }
                             .font(.system(size: 17, weight: .semibold))
