@@ -123,9 +123,9 @@ In other words, our final combination fits the MVP because it solves the real pr
 
 This use case does not work with just the main UI framework. SwiftUI is necessary, but not sufficient. The app genuinely needs multiple Apple frameworks working together:
 
-- `AuthenticationServices` for the login boundary
-- `UserNotifications` for reminder permissions and push behavior
-- `NetworkExtension` for provisioning-related device setup
+- `Apple sign-in` for the login boundary
+- `Push notifications` for reminder permissions and push behavior
+- `Core bluetooth` for provisioning-related device setup
 
 Without those, the app would still render screens, but it would not actually cover the product flow this repo is building.
 
@@ -133,10 +133,8 @@ Without those, the app would still render screens, but it would not actually cov
 
 We decided not to over-claim either one.
 
-- Accessibility: the app benefits from SwiftUI defaults, but we did not find evidence of a dedicated accessibility pass across the product. That means we can say there is a reasonable baseline, but not a fully audited accessibility implementation.
+- Accessibility: we will try to implement the light/dark mode after develop the prototype.
 - Localization: we found app-language state and settings UI, but the visible product strings are still mostly hardcoded in English. So the honest answer is that localization has been considered and partially scaffolded, but it is not finished enough to present as complete support yet.
-
-That choice is acceptable for an MVP report as long as we state it clearly.
 
 ### About Privacy
 
