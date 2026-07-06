@@ -4,11 +4,11 @@ This report explains how our initial assumptions changed after we explored the r
 
 ## 1. Present your team
 
-- Richard @richardsonjp
-- Steven @stevenchan7
-- Vincent @v1nccc
-- Andi @sgtandi
-- Wahyu @ayungavis
+- Richard `@richardsonjp`
+- Steven `@stevenchan7`
+- Vincent `@v1nccc`
+- Andi `@sgtandi`
+- Wahyu `@ayungavis`
 
 We present ourselves as one app team building a single product across three lanes: iOS app, backend service, and ESP32 firmware.
 
