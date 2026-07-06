@@ -36,6 +36,11 @@ struct HomeTabCoordinatorView: View {
                         observeDevicesUseCase: observeDevicesUseCase,
                         setDeviceEnabledUseCase: setDeviceEnabledUseCase
                     ),
+                    doseAttentionViewModel: DoseAttentionViewModel(
+                        getMedicinesUseCase: getMedicinesUseCase,
+                        getMedicineDosesUseCase: getMedicineDosesUseCase,
+                        markDoseTakenUseCase: markDoseTakenUseCase
+                    ),
                     makeConnectDeviceView: {
                         ConnectDeviceView(
                             viewModel: AddDeviceViewModel(

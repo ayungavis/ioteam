@@ -6,6 +6,7 @@ struct ScheduleUIDose: Identifiable { let id: String; let scheduledAt: Date; let
 struct DayItem: Identifiable { let id = UUID(); let date: Date; let dayString: String; let dateString: String }
 
 struct ScheduleView: View {
+    @Environment(AppNotificationManager.self) private var notificationManager
     @State private var selectedDate = Date()
     @State private var weekDays: [DayItem] = []
     @State private var viewModel: ScheduleViewModel
@@ -58,10 +59,39 @@ struct ScheduleView: View {
                 }
             }
         }
-        .onAppear { generateWeek(); Task { await viewModel.loadDoses() } }
+        .onAppear { generateWeek(); consumeNotificationRoute(); Task { await viewModel.loadDoses() } }
+        .onChange(of: notificationManager.pendingRoute) { _, newRoute in
+            guard newRoute != nil else { return }
+            consumeNotificationRoute()
+            Task { await viewModel.loadDoses() }
+        }
         .alert("Error", isPresented: Binding(get: { viewModel.alertMessage != nil }, set: { _ in viewModel.alertMessage = nil })) {
             Button("OK") {}
         } message: { Text(viewModel.alertMessage ?? "") }
+        .alert(
+            "Time for your medication",
+            isPresented: Binding(
+                get: { viewModel.doseAwaitingConfirmation != nil },
+                set: { if !$0 { viewModel.doseAwaitingConfirmation = nil } }
+            )
+        ) {
+            Button("Not yet", role: .cancel) {}
+            Button("Mark as Taken") {
+                if let dose = viewModel.doseAwaitingConfirmation {
+                    Task { await viewModel.markTaken(dose) }
+                }
+            }
+        } message: {
+            if let dose = viewModel.doseAwaitingConfirmation {
+                Text("Mark \(dose.medicineName) (\(dose.amount) pill\(dose.amount == 1 ? "" : "s"), \(dose.time)) as taken?")
+            }
+        }
+    }
+
+    private func consumeNotificationRoute() {
+        if let route = notificationManager.takePendingDoseRoute() {
+            viewModel.requestConfirmation(forDoseId: route.doseId)
+        }
     }
 
     private func currentDateFormatted() -> String { let formatter = DateFormatter(); formatter.dateFormat = "EEEE, MMMM d"; return formatter.string(from: Date()) }
@@ -93,26 +123,45 @@ struct DayStripCell: View {
 struct DoseTaskRow: View {
     let dose: ScheduleUIDose
     let onMarkTaken: () -> Void
+    private var isMissed: Bool { dose.status == .missed }
+    private var circleColor: Color {
+        switch dose.status {
+        case .taken: return .brandSuccess
+        case .missed: return .red
+        default: return .brandBorder
+        }
+    }
     var body: some View {
         HStack(spacing: 16) {
             Button(action: onMarkTaken) {
                 ZStack {
-                    Circle().stroke(dose.status == .taken ? Color.brandSuccess : Color.brandBorder, lineWidth: 2).frame(width: 28, height: 28)
+                    Circle().stroke(circleColor, lineWidth: 2).frame(width: 28, height: 28)
                     if dose.status == .taken { Circle().fill(Color.brandSuccess).frame(width: 28, height: 28)
                         Image(systemName: "checkmark").font(.system(size: 12, weight: .bold)).foregroundColor(.white) }
+                    if isMissed {
+                        Image(systemName: "xmark").font(.system(size: 12, weight: .bold)).foregroundColor(.red)
+                    }
                 }
-            }.buttonStyle(.plain).disabled(dose.status == .taken)
+            }.buttonStyle(.plain).disabled(dose.status == .taken || isMissed)
             VStack(alignment: .leading, spacing: 4) {
                 Text(dose.time).font(.system(size: 16, weight: .semibold)).foregroundColor(dose.status == .taken ? Color.brandTextTertiary : .brandTextPrimary)
                 Text(dose.medicineName).font(.system(size: 14)).foregroundColor(dose.status == .taken ? Color.brandTextTertiary : .brandTextPrimary)
                 Text(dose.deviceName).font(.system(size: 12)).foregroundColor(Color.brandTextTertiary)
             }
             Spacer()
-            Text("\(dose.amount) pill\(dose.amount == 1 ? "" : "s")")
-                .font(.system(size: 14, weight: .medium)).foregroundColor(dose.status == .taken ? Color.brandTextTertiary : Color.brandAccent)
-                .padding(.horizontal, 10).padding(.vertical, 5)
-                .background(dose.status == .taken ? Color.brandDisabledFill : Color.brandAccent.opacity(0.12)).clipShape(Capsule())
-                .overlay(Capsule().stroke(dose.status == .taken ? Color.brandBorder : Color.brandAccent.opacity(0.2), lineWidth: 0.5))
+            if isMissed {
+                Text("Missed")
+                    .font(.system(size: 14, weight: .medium)).foregroundColor(.red)
+                    .padding(.horizontal, 10).padding(.vertical, 5)
+                    .background(Color.red.opacity(0.1)).clipShape(Capsule())
+                    .overlay(Capsule().stroke(Color.red.opacity(0.2), lineWidth: 0.5))
+            } else {
+                Text("\(dose.amount) pill\(dose.amount == 1 ? "" : "s")")
+                    .font(.system(size: 14, weight: .medium)).foregroundColor(dose.status == .taken ? Color.brandTextTertiary : Color.brandAccent)
+                    .padding(.horizontal, 10).padding(.vertical, 5)
+                    .background(dose.status == .taken ? Color.brandDisabledFill : Color.brandAccent.opacity(0.12)).clipShape(Capsule())
+                    .overlay(Capsule().stroke(dose.status == .taken ? Color.brandBorder : Color.brandAccent.opacity(0.2), lineWidth: 0.5))
+            }
         }
         .padding(16).background(Color.brandCard).cornerRadius(16)
     }

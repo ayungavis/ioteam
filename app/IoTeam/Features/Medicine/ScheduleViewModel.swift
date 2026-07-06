@@ -6,6 +6,8 @@ final class ScheduleViewModel {
     var doses: [ScheduleUIDose] = []
     var isLoading = false
     var alertMessage: String?
+    var doseAwaitingConfirmation: ScheduleUIDose?
+    private var pendingConfirmDoseId: String?
 
     private let getMedicinesUseCase: GetMedicinesUseCase
     private let getMedicineDosesUseCase: GetMedicineDosesUseCase
@@ -31,7 +33,7 @@ final class ScheduleViewModel {
             let endDate = calendar.date(byAdding: .day, value: 7, to: Date()) ?? Date()
 
             for medicine in medicines {
-                let statusFilter = ["pending", "due", "taken"]
+                let statusFilter = ["pending", "due", "taken", "missed"]
                 let doseItems = try await getMedicineDosesUseCase.execute(medicineId: medicine.id, statuses: statusFilter)
                 for item in doseItems where item.scheduledAt <= endDate {
                     allDoses.append(ScheduleUIDose(
@@ -46,10 +48,25 @@ final class ScheduleViewModel {
                 }
             }
             doses = allDoses.sorted { $0.scheduledAt < $1.scheduledAt }
+            resolvePendingConfirmation()
         } catch {
             alertMessage = error.localizedDescription
         }
         isLoading = false
+    }
+
+    /// Queues a one-tap confirmation for the dose a push notification pointed at.
+    /// Resolves immediately if the dose list is already loaded, otherwise after the next load.
+    func requestConfirmation(forDoseId doseId: String) {
+        pendingConfirmDoseId = doseId
+        resolvePendingConfirmation()
+    }
+
+    private func resolvePendingConfirmation() {
+        guard let doseId = pendingConfirmDoseId,
+              let dose = doses.first(where: { $0.id == doseId }) else { return }
+        pendingConfirmDoseId = nil
+        if dose.status != .taken { doseAwaitingConfirmation = dose }
     }
 
     func dosesForDate(_ date: Date) -> [ScheduleUIDose] {
