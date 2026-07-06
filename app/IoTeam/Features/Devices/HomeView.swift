@@ -7,11 +7,17 @@ import SwiftUI
 struct HomeView: View {
     @Environment(HomeTabRouter.self) private var tabRouter
     @State private var viewModel: HomeViewModel
+    private let doseAttentionViewModel: DoseAttentionViewModel?
     private let makeConnectDeviceView: () -> ConnectDeviceView
     @State private var isAddDevicePresented = false
 
-    init(viewModel: HomeViewModel, makeConnectDeviceView: @escaping () -> ConnectDeviceView) {
+    init(
+        viewModel: HomeViewModel,
+        doseAttentionViewModel: DoseAttentionViewModel? = nil,
+        makeConnectDeviceView: @escaping () -> ConnectDeviceView
+    ) {
         _viewModel = State(initialValue: viewModel)
+        self.doseAttentionViewModel = doseAttentionViewModel
         self.makeConnectDeviceView = makeConnectDeviceView
     }
 
@@ -51,6 +57,11 @@ struct HomeView: View {
                                 .foregroundColor(.brandTextPrimary)
                         }
                         .padding(.top, 12)
+
+                        // MARK: - Doses needing action (due / needs confirmation)
+                        if let doseAttentionViewModel {
+                            DoseAttentionSection(viewModel: doseAttentionViewModel)
+                        }
 
                         // MARK: - Device Content
                         if viewModel.devices.isEmpty {

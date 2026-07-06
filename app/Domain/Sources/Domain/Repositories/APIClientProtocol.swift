@@ -16,12 +16,14 @@ public struct APIEndpoint {
     public let method: HTTPMethod
     public let body: Data?
     public let headers: [String: String]
+    public let queryItems: [URLQueryItem]?
 
-    public init(path: String, method: HTTPMethod = .get, body: Data? = nil, headers: [String: String] = [:]) {
+    public init(path: String, method: HTTPMethod = .get, body: Data? = nil, headers: [String: String] = [:], queryItems: [URLQueryItem]? = nil) {
         self.path = path
         self.method = method
         self.body = body
         self.headers = headers
+        self.queryItems = queryItems
     }
 }
 
@@ -35,7 +37,7 @@ public enum HTTPMethod: String {
 
 public enum NetworkError: Error, LocalizedError, Sendable, Equatable {
     case invalidURL
-    case decodingFailed
+    case decodingFailed(underlying: String? = nil)
     case unauthorized(message: String?)
     case badResponse(statusCode: Int, message: String?)
 
@@ -43,8 +45,8 @@ public enum NetworkError: Error, LocalizedError, Sendable, Equatable {
         switch self {
         case .invalidURL:
             return "The request URL is invalid."
-        case .decodingFailed:
-            return "Failed to decode the server response."
+        case .decodingFailed(let underlying):
+            return underlying ?? "Failed to decode the server response."
         case .unauthorized(let message):
             return message ?? "Unauthorized."
         case .badResponse(_, let message):

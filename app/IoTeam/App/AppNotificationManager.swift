@@ -17,6 +17,7 @@ struct PendingNotificationRoute: Equatable, Sendable {
     let kind: String
 }
 
+
 @Observable
 @MainActor
 final class AppNotificationManager {
@@ -27,9 +28,9 @@ final class AppNotificationManager {
     
     private var currentDeviceToken: String?
     private var registerPushTokenUseCase: RegisterPushTokenUseCase?
-    
+
     private init() {}
-    
+
     func configure(registerPushTokenUseCase: RegisterPushTokenUseCase) {
         self.registerPushTokenUseCase = registerPushTokenUseCase
     }
@@ -97,14 +98,20 @@ final class AppNotificationManager {
         }
         pendingRoute = route
     }
-    
+
+    /// Switches to the Schedule tab; ScheduleView then consumes the route via
+    /// `takePendingDoseRoute()` and shows a one-tap confirmation for the dose.
     func consumePendingRoute(using tabRouter: HomeTabRouter) {
         guard pendingRoute != nil else {
             return
         }
-        tabRouter.selectedTab = .medicine
-        tabRouter.medicinePath = NavigationPath()
-        pendingRoute = nil
+        tabRouter.selectedTab = .schedule
+        tabRouter.schedulePath = NavigationPath()
+    }
+
+    func takePendingDoseRoute() -> PendingNotificationRoute? {
+        defer { pendingRoute = nil }
+        return pendingRoute
     }
     
     private func registerCurrentTokenIfPossible() async {

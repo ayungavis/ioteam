@@ -14,9 +14,9 @@ public enum MedicineFrequency: String, Codable, Sendable, CaseIterable, Identifi
 
     public var displayName: String {
         switch self {
-        case .daily: return "Daily"
-        case .weekly: return "Weekly"
-        case .hourly: return "Hourly"
+        case .daily: return String(localized: "Daily")
+        case .weekly: return String(localized: "Weekly")
+        case .hourly: return String(localized: "Hourly")
         }
     }
 }
@@ -27,18 +27,18 @@ public enum DoseStatus: String, Codable, Sendable, CaseIterable {
     case taken
     case missed
     case skipped
-    case needsConfirmation
+    case needsConfirmation = "needs_confirmation"
     case disabled
 
     public var displayName: String {
         switch self {
-        case .pending: return "Pending"
-        case .due: return "Due"
-        case .taken: return "Taken"
-        case .missed: return "Missed"
-        case .skipped: return "Skipped"
-        case .needsConfirmation: return "Needs Confirmation"
-        case .disabled: return "Disabled"
+        case .pending: return String(localized: "Pending")
+        case .due: return String(localized: "Due")
+        case .taken: return String(localized: "Taken")
+        case .missed: return String(localized: "Missed")
+        case .skipped: return String(localized: "Skipped")
+        case .needsConfirmation: return String(localized: "Needs Confirmation")
+        case .disabled: return String(localized: "Disabled")
         }
     }
 }
@@ -120,5 +120,107 @@ public enum DoseSource: String, Codable, Sendable, CaseIterable {
         case .device: return "Device"
         case .manual: return "Manual"
         }
+    }
+}
+
+// MARK: - Backend DTOs
+
+public enum ScheduleConfig: Codable, Sendable, Equatable {
+    case daily(timesOfDay: [String])
+    case weekly(weekdays: [Int], timesOfDay: [String])
+    case hourly(intervalHours: Int)
+
+    private enum CodingKeys: String, CodingKey { case timesOfDay, weekdays, intervalHours }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        if let times = try? container.decode([String].self, forKey: .timesOfDay), !times.isEmpty,
+           try container.decodeIfPresent([Int].self, forKey: .weekdays) == nil {
+            self = .daily(timesOfDay: times); return
+        }
+        if let wd = try? container.decode([Int].self, forKey: .weekdays),
+           let times = try? container.decode([String].self, forKey: .timesOfDay) {
+            self = .weekly(weekdays: wd, timesOfDay: times); return
+        }
+        if let interval = try? container.decode(Int.self, forKey: .intervalHours) {
+            self = .hourly(intervalHours: interval); return
+        }
+        throw DecodingError.dataCorruptedError(forKey: .timesOfDay, in: container, debugDescription: "Unknown scheduleConfig")
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .daily(let times): try container.encode(times, forKey: .timesOfDay)
+        case .weekly(let wd, let times):
+            try container.encode(wd, forKey: .weekdays)
+            try container.encode(times, forKey: .timesOfDay)
+        case .hourly(let interval): try container.encode(interval, forKey: .intervalHours)
+        }
+    }
+}
+
+public struct ScheduleInput: Codable, Sendable, Equatable {
+    public let frequencyType: MedicineFrequency
+    public let scheduleConfig: ScheduleConfig
+    public let timezone: String
+    public let graceBeforeMinutes: Int
+    public let graceAfterMinutes: Int
+    public let startAt: Date
+    public let endAt: Date?
+
+    public init(frequencyType: MedicineFrequency, scheduleConfig: ScheduleConfig, timezone: String, graceBeforeMinutes: Int, graceAfterMinutes: Int, startAt: Date, endAt: Date? = nil) {
+        self.frequencyType = frequencyType
+        self.scheduleConfig = scheduleConfig
+        self.timezone = timezone
+        self.graceBeforeMinutes = graceBeforeMinutes
+        self.graceAfterMinutes = graceAfterMinutes
+        self.startAt = startAt
+        self.endAt = endAt
+    }
+}
+
+public struct GeneratedDose: Codable, Sendable, Identifiable, Equatable {
+    public let id: UUID
+    public let scheduledAt: Date
+    public let windowStartAt: Date
+    public let windowEndAt: Date
+    public let doseAmount: Int
+
+    // The backend's GeneratedDose payload carries no id (doses are not yet
+    // persisted), so the id is local-only and excluded from Codable.
+    private enum CodingKeys: String, CodingKey {
+        case scheduledAt, windowStartAt, windowEndAt, doseAmount
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = UUID()
+        self.scheduledAt = try container.decode(Date.self, forKey: .scheduledAt)
+        self.windowStartAt = try container.decode(Date.self, forKey: .windowStartAt)
+        self.windowEndAt = try container.decode(Date.self, forKey: .windowEndAt)
+        self.doseAmount = try container.decode(Int.self, forKey: .doseAmount)
+    }
+
+    public init(id: UUID = UUID(), scheduledAt: Date, windowStartAt: Date, windowEndAt: Date, doseAmount: Int) {
+        self.id = id
+        self.scheduledAt = scheduledAt
+        self.windowStartAt = windowStartAt
+        self.windowEndAt = windowEndAt
+        self.doseAmount = doseAmount
+    }
+}
+
+public struct DoseSummary: Codable, Sendable, Equatable {
+    public let totalDoses: Int
+    public let firstDoseAt: Date?
+    public let lastDoseAt: Date?
+    public let pillsUsed: Int
+
+    public init(totalDoses: Int, firstDoseAt: Date?, lastDoseAt: Date?, pillsUsed: Int) {
+        self.totalDoses = totalDoses
+        self.firstDoseAt = firstDoseAt
+        self.lastDoseAt = lastDoseAt
+        self.pillsUsed = pillsUsed
     }
 }

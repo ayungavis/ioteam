@@ -123,9 +123,14 @@ private struct JoinFamilySection: View {
 #Preview {
     FamilySetupView(
         viewModel: FamilySetupViewModel(
-            createFamilyUseCase: CreateFamilyUseCase(client: MockAPIClient()),
-            joinFamilyUseCase: JoinFamilyUseCase(client: MockAPIClient()),
-            completeOnboardingUseCase: CompleteOnboardingUseCase(client: MockAPIClient())
+            createFamilyUseCase: CreateFamilyUseCase(client: PreviewAPIClient()),
+            joinFamilyUseCase: JoinFamilyUseCase(client: PreviewAPIClient()),
+            registerDeviceUseCase: RegisterDeviceUseCase(client: PreviewAPIClient()),
+            completeOnboardingUseCase: CompleteOnboardingUseCase(client: PreviewAPIClient())
         )
     )
+}
+
+private final class PreviewAPIClient: APIClientProtocol {
+    func request<T: Decodable>(_ endpoint: APIEndpoint) async throws -> T { throw NetworkError.invalidURL }
 }

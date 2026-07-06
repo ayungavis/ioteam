@@ -4,8 +4,20 @@ import SwiftUI
 
 struct MedicineDetailView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.previewDosesUseCase) private var previewDosesUseCase
+    @Environment(\.createMedicineUseCase) private var createMedicineUseCase
+    @Environment(\.getMedicineDosesUseCase) private var getMedicineDosesUseCase
+    @Environment(\.listFamilyDevicesUseCase) private var listFamilyDevicesUseCase
+    @Environment(\.registerDeviceUseCase) private var registerDeviceUseCase
+    @Environment(\.getMedicineDetailUseCase) private var getMedicineDetailUseCase
+    @Environment(\.updateMedicineUseCase) private var updateMedicineUseCase
+    @Environment(\.deleteMedicineUseCase) private var deleteMedicineUseCase
+    @Environment(\.reschedulePreviewUseCase) private var reschedulePreviewUseCase
+    @Environment(\.rescheduleMedicineUseCase) private var rescheduleMedicineUseCase
     @State private var viewModel: MedicineDetailViewModel
     @State private var isDeleteAlertPresented = false
+    @State private var dosePreviewViewModel: DosePreviewViewModel?
+    @State private var showErrorAlert = false
 
     init(mode: MedicineDetailViewModel.Mode) {
         _viewModel = State(initialValue: MedicineDetailViewModel(mode: mode))
@@ -13,26 +25,64 @@ struct MedicineDetailView: View {
 
     var body: some View {
         ZStack {
-            Color.brandSurface
-                .ignoresSafeArea()
-
+            Color.brandSurface.ignoresSafeArea()
             ScrollView {
                 switch viewModel.mode {
                 case .add:
-                    AddMedicineForm(viewModel: viewModel, onSave: { dismiss() })
+                    AddMedicineForm(viewModel: viewModel, onReviewDoses: {
+                        Task {
+                            guard let result = await viewModel.previewDoses() else {
+                                if viewModel.alertMessage != nil { return }
+                                return
+                            }
+                            dosePreviewViewModel = DosePreviewViewModel(doses: result.doses, summary: result.summary, medicineName: viewModel.medicineName, totalQuantity: viewModel.quantity, scheduleInput: viewModel.buildScheduleInput(), onConfirm: { Task { let ok = await viewModel.createMedicine(); if ok { dismiss() } } })
+                        }
+                    })
                 case .edit:
-                    EditMedicineDetail(viewModel: viewModel, onDelete: { dismiss() })
+                    EditMedicineDetail(
+                        viewModel: viewModel,
+                        onSave: { Task { _ = await viewModel.saveChanges() } },
+                        onReviewReschedule: {
+                            Task {
+                                guard let result = await viewModel.previewReschedule() else { return }
+                                dosePreviewViewModel = DosePreviewViewModel(doses: result.doses, summary: result.summary, medicineName: viewModel.medicineName, totalQuantity: viewModel.remainingQuantity, scheduleInput: viewModel.buildScheduleInput(), onConfirm: { Task { _ = await viewModel.applyReschedule() } })
+                            }
+                        },
+                        onDelete: { isDeleteAlertPresented = true }
+                    )
                 }
             }
         }
+        .onAppear {
+            viewModel.configure(
+                useCases: MedicineDetailUseCases(
+                    previewDoses: previewDosesUseCase,
+                    createMedicine: createMedicineUseCase,
+                    getDoses: getMedicineDosesUseCase,
+                    listFamilyDevices: listFamilyDevicesUseCase,
+                    registerDevice: registerDeviceUseCase,
+                    getDetail: getMedicineDetailUseCase,
+                    update: updateMedicineUseCase,
+                    delete: deleteMedicineUseCase,
+                    reschedulePreview: reschedulePreviewUseCase,
+                    reschedule: rescheduleMedicineUseCase
+                ),
+                appSessionStore: AppSessionStore.shared
+            )
+        }
+        .onChange(of: viewModel.alertMessage) { _, newValue in
+            showErrorAlert = newValue != nil
+        }
+        .sheet(item: $dosePreviewViewModel) { vm in NavigationStack { DosePreviewView(viewModel: vm) } }
+        .alert("Error", isPresented: $showErrorAlert) {
+            Button("OK") { viewModel.alertMessage = nil }
+        } message: { Text(viewModel.alertMessage ?? "") }
         .alert("Delete Medicine", isPresented: $isDeleteAlertPresented) {
             Button("Cancel", role: .cancel) {}
             Button("Delete", role: .destructive) {
-                dismiss()
+                Task { if await viewModel.deleteMedicine() { dismiss() } }
             }
-        } message: {
-            Text("This will remove the medicine and stop tracking. This action cannot be undone.")
-        }
+        } message: { Text("This will remove the medicine and stop tracking. This action cannot be undone.") }
     }
 }
 
@@ -40,7 +90,7 @@ struct MedicineDetailView: View {
 
 private struct AddMedicineForm: View {
     @Bindable var viewModel: MedicineDetailViewModel
-    let onSave: () -> Void
+    let onReviewDoses: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
@@ -64,18 +114,29 @@ private struct AddMedicineForm: View {
 
             // Quantity
             FormField(label: "Quantity") {
-                Stepper(value: $viewModel.quantity, in: 1...999) {
-                    Text("\(viewModel.quantity) units")
-                        .font(.system(size: 16))
-                        .foregroundColor(.brandTextPrimary)
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 14)
-                .background(Color.brandCard)
-                .cornerRadius(12)
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.brandBorder, lineWidth: 1))
+                QuantityInputField(value: $viewModel.quantity, range: 1...999, unit: "units")
             }
 
+            ScheduleEditorFields(viewModel: viewModel)
+
+            // Save Button
+            PrimaryButton("Review Doses", isValid: viewModel.canSave, isLoading: viewModel.isGeneratingPreview, icon: .arrow) {
+                onReviewDoses()
+            }
+            .padding(.top, 8)
+        }
+        .padding(.horizontal, 24)
+        .padding(.bottom, 40)
+    }
+}
+
+// MARK: - Shared schedule editor (Add + Edit)
+
+private struct ScheduleEditorFields: View {
+    @Bindable var viewModel: MedicineDetailViewModel
+
+    var body: some View {
+        Group {
             // Schedule Type
             FormField(label: "Schedule Type") {
                 Picker("Frequency", selection: $viewModel.frequency) {
@@ -132,15 +193,7 @@ private struct AddMedicineForm: View {
                     .cornerRadius(12)
                     .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.brandBorder, lineWidth: 1))
             }
-
-            // Save Button
-            PrimaryButton("Save Medicine", isValid: viewModel.canSave, icon: .arrow) {
-                onSave()
-            }
-            .padding(.top, 8)
         }
-        .padding(.horizontal, 24)
-        .padding(.bottom, 40)
     }
 
     @ViewBuilder
@@ -150,8 +203,20 @@ private struct AddMedicineForm: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Times of Day").font(.system(size: 13)).foregroundColor(.brandTextSecondary)
                 ForEach($viewModel.dailyTimes, id: \.self) { $time in
-                    DatePicker("Time", selection: $time, displayedComponents: .hourAndMinute)
-                        .tint(Color.brandAccent)
+                    HStack {
+                        DatePicker("Time", selection: $time, displayedComponents: .hourAndMinute)
+                            .tint(Color.brandAccent)
+                        if viewModel.dailyTimes.count > 1 {
+                            Button {
+                                if let idx = viewModel.dailyTimes.firstIndex(of: time) {
+                                    viewModel.dailyTimes.remove(at: idx)
+                                }
+                            } label: {
+                                Image(systemName: "minus.circle.fill")
+                                    .foregroundColor(.red).font(.system(size: 18))
+                            }
+                        }
+                    }
                 }
                 Button {
                     viewModel.dailyTimes.append(Date())
@@ -209,135 +274,150 @@ private struct AddMedicineForm: View {
 
 private struct EditMedicineDetail: View {
     @Bindable var viewModel: MedicineDetailViewModel
-    @State private var isEditing = false
+    let onSave: () -> Void
+    let onReviewReschedule: () -> Void
     let onDelete: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
-            // Header
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(viewModel.medicineName)
-                        .font(.system(size: 28, weight: .bold))
-                        .foregroundColor(.brandTextPrimary)
-                    if let medicine = viewModel.medicine {
-                        Text(viewModel.scheduleSummary)
-                            .font(.system(size: 15))
-                            .foregroundColor(.brandTextSecondary)
+            Text("Medicine Detail")
+                .font(.system(size: 28, weight: .bold))
+                .foregroundColor(.brandTextPrimary)
+                .padding(.top, 24)
+
+            if viewModel.isLoadingDetail {
+                ProgressView().frame(maxWidth: .infinity).padding(.top, 20)
+            } else {
+                // Medicine Name
+                FormField(label: "Medicine Name") {
+                    TextField("Enter medicine name", text: $viewModel.medicineName)
+                        .textInputAutocapitalization(.words)
+                        .formFieldStyle()
+                }
+
+                // Enabled / Disabled
+                FormField(label: "Status") {
+                    Toggle(isOn: Binding(
+                        get: { viewModel.medicineStatus == .active },
+                        set: { viewModel.medicineStatus = $0 ? .active : .disabled }
+                    )) {
+                        Text(viewModel.medicineStatus == .active ? String(localized: "Enabled") : String(localized: "Disabled"))
+                            .font(.system(size: 16)).foregroundColor(.brandTextPrimary)
                     }
+                    .tint(Color.brandSuccess)
+                    .padding(.horizontal, 16).padding(.vertical, 14)
+                    .background(Color.brandCard).cornerRadius(12)
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.brandBorder, lineWidth: 1))
                 }
-                Spacer()
-                if let medicine = viewModel.medicine {
-                    StatusBadge(status: medicine.status)
+
+                // Stock
+                FormField(label: "Stock") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Text("Remaining").font(.system(size: 14)).foregroundColor(.brandTextSecondary)
+                            Spacer()
+                            Text("\(viewModel.remainingQuantity) / \(viewModel.totalQuantity)")
+                                .font(.system(size: 15, weight: .medium)).foregroundColor(.brandTextPrimary)
+                        }
+                        Divider()
+                        HStack(spacing: 12) {
+                            Text("Adjust by").font(.system(size: 14)).foregroundColor(.brandTextSecondary)
+                            TextField("0", value: $viewModel.adjustQuantityDelta, format: .number)
+                                .keyboardType(.numbersAndPunctuation)
+                                .font(.system(size: 16))
+                                .foregroundColor(viewModel.adjustQuantityDelta >= 0 ? .brandTextPrimary : .red)
+                                .frame(maxWidth: 70)
+                            Spacer()
+                            Stepper("", value: $viewModel.adjustQuantityDelta, in: -viewModel.remainingQuantity...999).labelsHidden()
+                        }
+                        Text("Positive adds pills (refill), negative removes them.")
+                            .font(.system(size: 12)).foregroundColor(.brandTextTertiary)
+                    }
+                    .padding(16).background(Color.brandCard).cornerRadius(12)
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.brandBorder, lineWidth: 1))
+                }
+
+                PrimaryButton("Save Changes", isValid: viewModel.hasDetailChanges && viewModel.canSave, isLoading: viewModel.isSaving, icon: .checkmark) {
+                    onSave()
+                }
+
+                // Schedule (applied separately via reschedule preview)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Change Schedule")
+                        .font(.system(size: 20, weight: .bold))
+                        .foregroundColor(.brandTextPrimary)
+                    Text("Replaces upcoming doses with a new plan. Past doses are kept.")
+                        .font(.system(size: 13)).foregroundColor(.brandTextSecondary)
+                }
+                ScheduleEditorFields(viewModel: viewModel)
+                PrimaryButton("Review New Schedule", isValid: true, isLoading: viewModel.isGeneratingPreview, icon: .arrow) {
+                    onReviewReschedule()
                 }
             }
-            .padding(.top, 24)
 
-            // Summary Card
-            if let medicine = viewModel.medicine {
-                VStack(spacing: 16) {
-                    SummaryRow(title: "Total Quantity", value: "\(medicine.totalQuantity)")
-                    Divider()
-                    SummaryRow(title: "Remaining", value: "\(medicine.remainingQuantity)")
-                    Divider()
-                    SummaryRow(title: "Linked Device", value: medicine.linkedDeviceName ?? "—")
-                    Divider()
-                    SummaryRow(title: "Frequency", value: medicine.frequency.displayName)
-                }
-                .padding(20)
-                .background(Color.brandCard)
-                .cornerRadius(16)
-            }
-
-            // Dose List
             VStack(alignment: .leading, spacing: 12) {
                 Text("Dose History")
                     .font(.system(size: 20, weight: .bold))
                     .foregroundColor(.brandTextPrimary)
 
-                // Filter Tabs
-                HStack(spacing: 8) {
-                    ForEach(DoseFilter.allCases) { filter in
-                        Button {
-                            viewModel.doseFilter = filter
-                        } label: {
-                            Text(filter.displayName)
-                                .font(.system(size: 13, weight: .semibold))
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 8)
-                                .background(viewModel.doseFilter == filter ? Color.brandAccent : Color.brandCard)
-                                .foregroundColor(viewModel.doseFilter == filter ? .white : .brandTextSecondary)
-                                .clipShape(Capsule())
+                if viewModel.isLoadingDoses {
+                    ProgressView().frame(maxWidth: .infinity).padding(.top, 20)
+                } else {
+                    HStack(spacing: 8) {
+                        ForEach(DoseFilter.allCases) { filter in
+                            Button { viewModel.doseFilter = filter } label: {
+                                Text(filter.displayName).font(.system(size: 13, weight: .semibold))
+                                    .padding(.horizontal, 14).padding(.vertical, 8)
+                                    .background(viewModel.doseFilter == filter ? Color.brandAccent : Color.brandCard)
+                                    .foregroundColor(viewModel.doseFilter == filter ? .white : .brandTextSecondary)
+                                    .clipShape(Capsule())
+                            }
                         }
                     }
-                }
-
-                // Dose Items
-                ForEach(viewModel.filteredDoses) { dose in
-                    DoseRow(dose: dose)
+                    ForEach(viewModel.filteredDoses) { dose in DoseRow(dose: dose) }
                 }
             }
 
-            // Actions
-            VStack(spacing: 12) {
-                Button {
-                    isEditing = true
-                } label: {
-                    HStack {
-                        Image(systemName: "pencil")
-                        Text("Edit Schedule")
-                    }
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(.brandTextPrimary)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 50)
-                    .background(Color.brandCard)
-                    .cornerRadius(12)
-                }
-
-                if let medicine = viewModel.medicine {
-                    Button {
-                        // Toggle disable/enable
-                    } label: {
-                        HStack {
-                            Image(systemName: medicine.status == .active ? "pause.circle" : "play.circle")
-                            Text(medicine.status == .active ? "Disable" : "Enable")
-                        }
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(.brandTextPrimary)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 50)
-                        .background(Color.brandCard)
-                        .cornerRadius(12)
-                    }
-                }
-
-                Button(role: .destructive) {
-                    // Trigger delete alert
-                } label: {
-                    HStack {
-                        Image(systemName: "trash")
-                        Text("Delete Medicine")
-                    }
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(.red)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 50)
-                    .background(Color.brandCard)
-                    .cornerRadius(12)
-                }
-            }
-            .padding(.top, 8)
-        }
-        .padding(.horizontal, 24)
-        .padding(.bottom, 40)
+            Button(role: .destructive) { onDelete() } label: {
+                HStack { Image(systemName: "trash"); Text("Delete Medicine") }
+                    .font(.system(size: 16, weight: .semibold)).foregroundColor(.red)
+                    .frame(maxWidth: .infinity).frame(height: 50).background(Color.brandCard).cornerRadius(12)
+            }.padding(.top, 8)
+        }.padding(.horizontal, 24).padding(.bottom, 40)
     }
 }
 
-// MARK: - Shared Components
+/// Number field with direct keyboard entry plus a stepper for small adjustments.
+private struct QuantityInputField: View {
+    @Binding var value: Int
+    let range: ClosedRange<Int>
+    let unit: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            TextField("0", value: $value, format: .number)
+                .keyboardType(.numberPad)
+                .font(.system(size: 16))
+                .foregroundColor(.brandTextPrimary)
+                .frame(maxWidth: 80)
+            Text(unit).font(.system(size: 14)).foregroundColor(.brandTextSecondary)
+            Spacer()
+            Stepper("", value: $value, in: range).labelsHidden()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .background(Color.brandCard)
+        .cornerRadius(12)
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.brandBorder, lineWidth: 1))
+        .onChange(of: value) { _, newValue in
+            if newValue < range.lowerBound { value = range.lowerBound }
+            if newValue > range.upperBound { value = range.upperBound }
+        }
+    }
+}
 
 private struct FormField<Content: View>: View {
-    let label: String
+    let label: LocalizedStringKey
     @ViewBuilder var content: Content
 
     var body: some View {
@@ -351,7 +431,7 @@ private struct FormField<Content: View>: View {
 }
 
 private struct SummaryRow: View {
-    let title: String
+    let title: LocalizedStringKey
     let value: String
 
     var body: some View {
@@ -368,58 +448,47 @@ private struct SummaryRow: View {
 }
 
 private struct DoseRow: View {
-    let dose: Dose
+    let dose: DoseItem
 
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 4) {
-                Text(dose.scheduledAt, style: .date)
-                    .font(.system(size: 13))
-                    .foregroundColor(.brandTextSecondary)
-                Text(dose.scheduledAt, style: .time)
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundColor(.brandTextPrimary)
+                Text(dose.scheduledAt, style: .date).font(.system(size: 13)).foregroundColor(.brandTextSecondary)
+                Text(dose.scheduledAt, style: .time).font(.system(size: 15, weight: .medium)).foregroundColor(.brandTextPrimary)
             }
-
             Spacer()
-
             VStack(alignment: .trailing, spacing: 4) {
                 DoseStatusBadge(status: dose.status)
-                if let taken = dose.actualTakenAt {
-                    Text("Taken \(taken.formatted(date: .omitted, time: .shortened))")
-                        .font(.system(size: 12))
-                        .foregroundColor(.brandTextSecondary)
-                }
+                if let takenAt = dose.actualTakenAt { Text("Taken \(takenAt.formatted(date: .omitted, time: .shortened))").font(.system(size: 12)).foregroundColor(.brandTextSecondary) }
             }
         }
-        .padding(16)
-        .background(Color.brandCard)
-        .cornerRadius(12)
+        .padding(16).background(Color.brandCard).cornerRadius(12)
     }
 }
 
 private struct DoseStatusBadge: View {
-    let status: DoseStatus
+    let status: String
+
+    var displayName: String {
+        switch status {
+        case "taken": return String(localized: "Taken"); case "missed": return String(localized: "Missed")
+        case "due": return String(localized: "Due"); case "needs_confirmation": return String(localized: "Needs Confirmation")
+        default: return status.prefix(1).uppercased() + status.dropFirst()
+        }
+    }
 
     var body: some View {
-        Text(status.displayName)
-            .font(.system(size: 11, weight: .semibold))
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(color.opacity(0.15))
-            .foregroundColor(color)
-            .clipShape(Capsule())
+        Text(displayName).font(.system(size: 11, weight: .semibold))
+            .padding(.horizontal, 8).padding(.vertical, 4).background(color.opacity(0.15))
+            .foregroundColor(color).clipShape(Capsule())
     }
 
     private var color: Color {
         switch status {
-        case .taken: return Color.brandSuccess
-        case .missed: return Color.red
-        case .due: return Color.brandAccent
-        case .pending: return Color.brandTextSecondary
-        case .skipped: return Color.brandTextSecondary
-        case .needsConfirmation: return Color.brandAccentStrong
-        case .disabled: return Color.brandTextSecondary
+        case "taken": return Color.brandSuccess; case "missed": return Color.red; case "due": return Color.brandAccent
+        case "pending": return Color.brandTextSecondary; case "skipped": return Color.brandTextSecondary
+        case "needs_confirmation": return Color.brandAccentStrong
+        default: return Color.brandTextSecondary
         }
     }
 }
@@ -482,17 +551,5 @@ private extension View {
 }
 
 #Preview("Edit") {
-    MedicineDetailView(mode: .edit(
-        Medicine(
-            id: UUID(),
-            name: "Paracetamol",
-            totalQuantity: 30,
-            remainingQuantity: 24,
-            status: .active,
-            linkedDeviceName: "My medicine box",
-            nextDoseTime: Date().addingTimeInterval(7200),
-            frequency: .daily,
-            scheduleTimesText: "08:00, 13:00, 18:00"
-        )
-    ))
+    MedicineDetailView(mode: .edit(medicineID: "preview-id"))
 }

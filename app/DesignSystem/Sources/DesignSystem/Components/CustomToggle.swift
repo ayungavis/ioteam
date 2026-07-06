@@ -10,11 +10,11 @@ public struct CustomToggle: View {
     public var body: some View {
         ZStack {
             Capsule()
-                .fill(isOn ? Color.brandAccent : Color.white)
+                .fill(isOn ? Color.brandAccent : Color.brandDisabledFill)
                 .frame(width: 52, height: 32)
                 .overlay(
                     Capsule()
-                        .stroke(Color.black.opacity(0.1), lineWidth: isOn ? 0 : 1.5)
+                        .stroke(Color.brandBorder, lineWidth: isOn ? 0 : 1.5)
                 )
 
             Circle()
@@ -22,7 +22,7 @@ public struct CustomToggle: View {
                 .frame(width: 24, height: 24)
                 .shadow(color: Color.black.opacity(0.15), radius: 2, x: 0, y: 1)
                 .overlay(
-                    Circle().stroke(Color.black.opacity(0.05), lineWidth: 0.5)
+                    Circle().stroke(Color.brandBorder, lineWidth: 0.5)
                 )
                 .offset(x: isOn ? 10 : -10)
                 .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isOn)
