@@ -62,7 +62,6 @@ We considered:
 We dropped it because:
 
 - The repo and PRD both point to custom Core Bluetooth plus Wi-Fi provisioning as the MVP path. Matter and HomeKit are mentioned, but they are clearly treated as later-stage options because certification, interoperability, and setup complexity would slow down the first usable version.
-- APNS did not behave like an auth add-on. In practice, it has its own delivery path, topic, key material, and runtime behavior, so keeping it separate made the implementation more honest and easier to reason about.
 
 ## 5. Real Limitations Hit
 
