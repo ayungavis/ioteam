@@ -1,12 +1,16 @@
-# DoseLatch Technical Report
+# Technical Report
+
+This report explains how our initial assumptions changed after we explored the real project. It focuses on what we first expected, what we actually found in the iOS app, backend, and firmware, what alternatives we considered, and why our final technical direction fits the MVP we want to present.
 
 ## 1. Present your team
 
-- Richard @richardsonjp 
-- Andi @sgtandi
+- Richard @richardsonjp
 - Steven @stevenchan7
 - Vincent @v1nccc
+- Andi @sgtandi
 - Wahyu @ayungavis
+
+We present ourselves as one app team building a single product across three lanes: iOS app, backend service, and ESP32 firmware.
 
 ## 2. Starting Assumption
 
@@ -22,27 +26,27 @@ We think we'll end up using:
 
 Because:
 
-That looked like the obvious fit from the repo shape alone. The project is split into `app`, `backend`, and `controller`, which usually means "native app + custom service + custom firmware." The PRD also pointed in that direction before we dug into the actual implementation.
+That looked like the obvious fit from the repo shape alone. The project is split into `app`, `backend`, and `controller`, which strongly suggests a native app, a custom service layer, and custom device firmware. The PRD also pointed in that direction before we dug into the actual implementation.
 
 ## 3. The Exploration Log
 
 What we browsed, and what surprised us:
 
 - We started from the root `README.md` and confirmed the repo is intentionally split into iOS app, backend service, and micro-controller code.
-- We read `doselatch_prd.md` to see the intended product shape before treating the code as the final source of truth.
-- We checked the app imports and found real Apple-framework usage instead of placeholders: `AuthenticationServices` for Apple sign-in, `UserNotifications` for push, and `NetworkExtension` for provisioning work.
+- We read `docs/prd.md` to understand the intended product before treating the code as the final source of truth.
+- We checked the app imports and found real Apple-framework usage instead of placeholders: `AuthenticationServices` for Apple sign-in, `UserNotifications` for push, and `NetworkExtension` for provisioning-related work.
 - We checked the backend and found Express + Sequelize, not a Swift server or a Firebase-style shortcut.
 - We checked the firmware entrypoint and found a custom BLE GATT service, Wi-Fi credential handling, local storage, and reed-switch event publishing on the ESP32.
 - One thing that surprised us was localization: there is already a `LocaleManager` and app-language selection state, but the visible product strings are still mostly hardcoded English text.
-- Another surprise was that some UI still openly calls parts of the product a prototype or says flows are mocked, even though other parts of the repo are already wired to real endpoints.
+- Another surprise was that some UI still labels parts of the product as prototype or mocked, even though other parts of the repo are already wired to real endpoints.
 
 What we actually built or tested in code (not just read about):
 
 - We implemented and validated Sign in with Apple integration between the iOS app and backend.
 - We implemented and validated APNS token registration and backend push delivery wiring.
 - We implemented onboarding with profile completion, create family, join family, and onboarding completion.
-- We implemented the connection between the device (ESP32) and the app using Core Bluetooth
-- We verified the live app target with the project build command rather than treating the code as "probably fine."
+- We implemented the connection between the device and the app using the custom BLE path that exists in the current product.
+- We verified the live app target with the project build command instead of assuming the code was already in a working state.
 
 What we discovered that we didn't expect:
 
@@ -54,11 +58,11 @@ What we discovered that we didn't expect:
 We considered:
 
 - using Matter or HomeKit as the main onboarding and device-integration path
-- treating push notifications as "just part of Apple auth" instead of a separate delivery concern
 
 We dropped it because:
 
-- The repo and PRD both point to custom Core Bluetooth plus Wi-Fi provisioning as the MVP path. Matter and HomeKit are mentioned, but they are clearly treated as later-stage options because certification, interoperability, and setup complexity would slow down the first usable version
+- The repo and PRD both point to custom Core Bluetooth plus Wi-Fi provisioning as the MVP path. Matter and HomeKit are mentioned, but they are clearly treated as later-stage options because certification, interoperability, and setup complexity would slow down the first usable version.
+- APNS did not behave like an auth add-on. In practice, it has its own delivery path, topic, key material, and runtime behavior, so keeping it separate made the implementation more honest and easier to reason about.
 
 ## 5. Real Limitations Hit
 
@@ -68,12 +72,27 @@ How we worked around it (or how it changed our use case / mechanic):
 
 - We treated Apple identity as the login boundary, not as the permanent source of editable user profile data.
 - The app refreshes the backend profile and uses session fallback where necessary instead of assuming Apple will keep returning the same fields forever.
-- We realized that the connectivity can be realtime, the device can send the data directly to the app using the bluetooth connection.
+
+APNS was not interchangeable with the rest of the Apple auth setup.
 
 How we worked around it (or how it changed our use case / mechanic):
 
 - We separated push setup from sign-in setup.
 - The backend uses the APNS token-based path and HTTP/2 delivery instead of trying to reuse a simpler HTTP client flow.
+
+Localization support existed only partially.
+
+How we worked around it (or how it changed our use case / mechanic):
+
+- We did not claim full localization in this report.
+- We treated language selection as scaffolded product state, not as a finished multilingual experience.
+
+AI also could not safely guess the product boundaries without checking the repo.
+
+How we worked around it (or how it changed our use case / mechanic):
+
+- We grounded the report in the real checkout: firmware code, backend routes, Swift imports, and the current onboarding and notification flows.
+- That changed the report from a generic reminder-app summary into a more accurate description of an IoT medication workflow with real device, family, and schedule constraints.
 
 ## 6. The Revised Decision
 
@@ -92,7 +111,9 @@ What changed since Section 1, and why:
 - Our first instinct mostly held, but the exploration made the boundaries much sharper.
 - The biggest change was not the choice of frameworks, but our understanding of where the real complexity lives.
 - We first guessed "SwiftUI app with some backend help." What we actually found was a three-part product where the backend owns important family, device, and dose rules, and the firmware already carries meaningful behavior instead of acting like a passive sensor.
-- We also became more confident that Matter/HomeKit should stay out of the MVP path because the current custom BLE route is already enough to prove the device workflow.
+- We also became more confident that Matter and HomeKit should stay out of the MVP path because the current custom BLE route is already enough to prove the device workflow.
+
+In other words, our final combination fits the MVP because it solves the real product problem with the tools already working in this repo, without taking on unnecessary ecosystem complexity too early.
 
 ---
 
@@ -115,7 +136,7 @@ We decided not to over-claim either one.
 - Accessibility: the app benefits from SwiftUI defaults, but we did not find evidence of a dedicated accessibility pass across the product. That means we can say there is a reasonable baseline, but not a fully audited accessibility implementation.
 - Localization: we found app-language state and settings UI, but the visible product strings are still mostly hardcoded in English. So the honest answer is that localization has been considered and partially scaffolded, but it is not finished enough to present as complete support yet.
 
-That choice is fine for an MVP report as long as we say it directly.
+That choice is acceptable for an MVP report as long as we state it clearly.
 
 ### About Privacy
 
