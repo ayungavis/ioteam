@@ -39,11 +39,15 @@ final class ScheduleViewModel {
                     allDoses.append(ScheduleUIDose(
                         id: item.id,
                         scheduledAt: item.scheduledAt,
+                        windowStartAt: item.windowStartAt,
+                        windowEndAt: item.windowEndAt,
                         time: Self.timeFormatter.string(from: item.scheduledAt),
                         medicineName: medicine.name,
                         deviceName: medicine.device?.name ?? "—",
                         amount: item.doseAmount,
-                        status: Domain.DoseStatus(rawValue: item.status) ?? .pending
+                        status: Domain.DoseStatus(rawValue: item.status) ?? .pending,
+                        actualTakenAt: item.actualTakenAt,
+                        takenSource: item.takenSource
                     ))
                 }
             }

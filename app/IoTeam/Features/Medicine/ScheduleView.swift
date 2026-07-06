@@ -2,13 +2,29 @@ import DesignSystem
 import Domain
 import SwiftUI
 
-struct ScheduleUIDose: Identifiable { let id: String; let scheduledAt: Date; let time: String; let medicineName: String; let deviceName: String; let amount: Int; var status: Domain.DoseStatus }
+struct ScheduleUIDose: Identifiable {
+    let id: String
+    let scheduledAt: Date
+    let windowStartAt: Date
+    let windowEndAt: Date
+    let time: String
+    let medicineName: String
+    let deviceName: String
+    let amount: Int
+    var status: Domain.DoseStatus
+    var actualTakenAt: Date?
+    let takenSource: String?
+
+    var graceBeforeMinutes: Int { max(0, Int(scheduledAt.timeIntervalSince(windowStartAt) / 60)) }
+    var graceAfterMinutes: Int { max(0, Int(windowEndAt.timeIntervalSince(scheduledAt) / 60)) }
+}
 struct DayItem: Identifiable { let id = UUID(); let date: Date; let dayString: String; let dateString: String }
 
 struct ScheduleView: View {
     @Environment(AppNotificationManager.self) private var notificationManager
     @State private var selectedDate = Date()
     @State private var weekDays: [DayItem] = []
+    @State private var detailDose: ScheduleUIDose?
     @State private var viewModel: ScheduleViewModel
 
     init(viewModel: ScheduleViewModel) {
@@ -48,9 +64,11 @@ struct ScheduleView: View {
                                     .frame(maxWidth: .infinity, alignment: .center).padding(.top, 20)
                             } else {
                                 ForEach(todayDoses) { dose in
-                                    DoseTaskRow(dose: dose) {
-                                        Task { await viewModel.markTaken(dose) }
-                                    }
+                                    DoseTaskRow(
+                                        dose: dose,
+                                        onMarkTaken: { Task { await viewModel.markTaken(dose) } },
+                                        onShowDetail: { detailDose = dose }
+                                    )
                                 }
                             }
                         }
@@ -58,6 +76,13 @@ struct ScheduleView: View {
                     }
                 }
             }
+        }
+        .sheet(item: $detailDose) { dose in
+            DoseDetailSheet(dose: dose, onMarkTaken: {
+                Task { await viewModel.markTaken(dose) }
+                detailDose = nil
+            })
+            .presentationDetents([.medium])
         }
         .onAppear { generateWeek(); consumeNotificationRoute(); Task { await viewModel.loadDoses() } }
         .onChange(of: notificationManager.pendingRoute) { _, newRoute in
@@ -123,6 +148,7 @@ struct DayStripCell: View {
 struct DoseTaskRow: View {
     let dose: ScheduleUIDose
     let onMarkTaken: () -> Void
+    let onShowDetail: () -> Void
     private var isMissed: Bool { dose.status == .missed }
     private var circleColor: Color {
         switch dose.status {
@@ -148,7 +174,9 @@ struct DoseTaskRow: View {
                 Text(dose.medicineName).font(.system(size: 14)).foregroundColor(dose.status == .taken ? Color.brandTextTertiary : .brandTextPrimary)
                 Text(dose.deviceName).font(.system(size: 12)).foregroundColor(Color.brandTextTertiary)
             }
-            Spacer()
+            .contentShape(Rectangle())
+            .onTapGesture { onShowDetail() }
+            Spacer().contentShape(Rectangle()).onTapGesture { onShowDetail() }
             if isMissed {
                 Text("Missed")
                     .font(.system(size: 14, weight: .medium)).foregroundColor(.red)
@@ -164,5 +192,73 @@ struct DoseTaskRow: View {
             }
         }
         .padding(16).background(Color.brandCard).cornerRadius(16)
+    }
+}
+
+/// Detail sheet for a single dose — everything comes from the already-fetched dose record;
+/// the window bounds are the medicine's grace period materialized per dose.
+struct DoseDetailSheet: View {
+    let dose: ScheduleUIDose
+    let onMarkTaken: () -> Void
+
+    private var isActionable: Bool { dose.status == .pending || dose.status == .due || dose.status == .missed }
+    private var isLate: Bool { dose.status == .missed }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(dose.medicineName)
+                    .font(.system(size: 24, weight: .bold)).foregroundColor(.brandTextPrimary)
+                Text(dose.deviceName)
+                    .font(.system(size: 14)).foregroundColor(.brandTextSecondary)
+            }
+            .padding(.top, 24)
+
+            VStack(spacing: 12) {
+                DoseDetailRow(label: "Status", value: dose.status.displayName)
+                DoseDetailRow(label: "Scheduled", value: dose.scheduledAt.formatted(date: .abbreviated, time: .shortened))
+                DoseDetailRow(label: "Amount", value: "\(dose.amount) pill\(dose.amount == 1 ? "" : "s")")
+                DoseDetailRow(
+                    label: "Window",
+                    value: "\(dose.windowStartAt.formatted(date: .omitted, time: .shortened)) – \(dose.windowEndAt.formatted(date: .omitted, time: .shortened))"
+                )
+                DoseDetailRow(label: "Grace period", value: "\(dose.graceBeforeMinutes) min before · \(dose.graceAfterMinutes) min after")
+                if let takenAt = dose.actualTakenAt {
+                    DoseDetailRow(label: "Taken at", value: takenAt.formatted(date: .abbreviated, time: .shortened))
+                }
+                if let source = dose.takenSource {
+                    DoseDetailRow(label: "Recorded by", value: source == "device_event" ? "Pill box" : "Manually in app")
+                }
+            }
+            .padding(16)
+            .background(Color.brandCard)
+            .cornerRadius(16)
+
+            if isActionable {
+                if isLate {
+                    Text("This dose was missed. You can still record it — the actual time you took it will be saved.")
+                        .font(.system(size: 13)).foregroundColor(.brandTextSecondary)
+                }
+                PrimaryButton(isLate ? "Take Late" : "Mark as Taken", icon: .checkmark, tint: .success) { onMarkTaken() }
+            }
+
+            Spacer()
+        }
+        .padding(.horizontal, 24)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.brandSurface)
+    }
+}
+
+private struct DoseDetailRow: View {
+    let label: String
+    let value: String
+    var body: some View {
+        HStack {
+            Text(label).font(.system(size: 14)).foregroundColor(.brandTextSecondary)
+            Spacer()
+            Text(value).font(.system(size: 14, weight: .medium)).foregroundColor(.brandTextPrimary)
+                .multilineTextAlignment(.trailing)
+        }
     }
 }
