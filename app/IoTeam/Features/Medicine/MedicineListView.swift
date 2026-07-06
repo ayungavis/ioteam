@@ -86,7 +86,7 @@ struct MedicineCard: View {
 struct StatusBadge: View {
     let status: MedicineStatus
     var body: some View {
-        Text(status == .active ? "Enabled" : "Disabled").font(.system(size: 12, weight: .semibold))
+        Text(status == .active ? String(localized: "Enabled") : String(localized: "Disabled")).font(.system(size: 12, weight: .semibold))
             .padding(.horizontal, 10).padding(.vertical, 5)
             .background((status == .active ? Color.brandSuccess : Color.brandTextSecondary).opacity(0.15))
             .foregroundColor(status == .active ? Color.brandSuccess : Color.brandTextSecondary).clipShape(Capsule())

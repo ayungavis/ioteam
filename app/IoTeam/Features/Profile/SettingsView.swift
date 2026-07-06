@@ -5,7 +5,7 @@ struct SettingsView: View {
     @State private var doseReminders = true
     @State private var missedAlerts = true
     @State private var familyActivity = false
-    @State private var darkMode = false
+    @AppStorage(AppTheme.storageKey) private var appTheme = AppTheme.system.rawValue
     @State private var faceID = false
     @State private var passcode = false
 
@@ -19,9 +19,10 @@ struct SettingsView: View {
                 }
 
                 Section("Appearance") {
-                    Picker("Theme", selection: $darkMode) {
-                        Text("Light").tag(false)
-                        Text("Dark").tag(true)
+                    Picker("Theme", selection: $appTheme) {
+                        Text("System").tag(AppTheme.system.rawValue)
+                        Text("Light").tag(AppTheme.light.rawValue)
+                        Text("Dark").tag(AppTheme.dark.rawValue)
                     }
                     .pickerStyle(.segmented)
                 }

@@ -122,7 +122,7 @@ final class ManageFamilyViewModel {
         guard let familyId = family?.id,
               let email = AppSessionStore.shared.currentUser?.email,
               let myId = members.first(where: { $0.user.email == email })?.id else {
-            errorMessage = "Could not find your membership."
+            errorMessage = String(localized: "Could not find your membership.")
             return
         }
         do {

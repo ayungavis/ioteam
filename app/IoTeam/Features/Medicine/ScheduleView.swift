@@ -227,7 +227,7 @@ struct DoseDetailSheet: View {
                     DoseDetailRow(label: "Taken at", value: takenAt.formatted(date: .abbreviated, time: .shortened))
                 }
                 if let source = dose.takenSource {
-                    DoseDetailRow(label: "Recorded by", value: source == "device_event" ? "Pill box" : "Manually in app")
+                    DoseDetailRow(label: "Recorded by", value: source == "device_event" ? String(localized: "Pill box") : String(localized: "Manually in app"))
                 }
             }
             .padding(16)
@@ -251,7 +251,7 @@ struct DoseDetailSheet: View {
 }
 
 private struct DoseDetailRow: View {
-    let label: String
+    let label: LocalizedStringKey
     let value: String
     var body: some View {
         HStack {

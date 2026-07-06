@@ -13,6 +13,7 @@ import SwiftUI
 @main
 struct IoTeamApp: App {
     @UIApplicationDelegateAdaptor(IoTeamAppDelegate.self) private var appDelegate
+    @AppStorage(AppTheme.storageKey) private var appTheme = AppTheme.system.rawValue
 
     let sharedContainer: ModelContainer
     let appleSignInUseCase: AppleSignInUseCase
@@ -132,6 +133,7 @@ struct IoTeamApp: App {
                 .environment(\.getFamilyMembersUseCase, getFamilyMembersUseCase)
                 .environment(\.deviceRepository, deviceRepository)
                 .environment(\.wiFiProvisioningService, wiFiProvisioningService)
+                .preferredColorScheme((AppTheme(rawValue: appTheme) ?? .system).colorScheme)
         }
     }
 }

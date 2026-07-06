@@ -235,7 +235,7 @@ final class MedicineDetailViewModel {
 
     func createMedicine() async -> Bool {
         guard let useCase = useCases?.createMedicine else {
-            await MainActor.run { alertMessage = "Not ready yet. Please try again." }
+            await MainActor.run { alertMessage = String(localized: "Not ready yet. Please try again.") }
             return false
         }
         do {
@@ -264,7 +264,7 @@ final class MedicineDetailViewModel {
         // 3. TEMPORARY bypass while no physical device is connected:
         //    register a placeholder device so the backend's required deviceId is satisfied.
         guard let registerDevice = useCases?.registerDevice else {
-            throw NetworkError.badResponse(statusCode: 0, message: "Device not set up. Complete family setup first.")
+            throw NetworkError.badResponse(statusCode: 0, message: String(localized: "Device not set up. Complete family setup first."))
         }
         let placeholderName = selectedDeviceName.trimmingCharacters(in: .whitespacesAndNewlines)
         let registered = try await registerDevice.execute(deviceName: placeholderName.isEmpty ? "My DoseLatch" : placeholderName)
@@ -320,8 +320,8 @@ enum DoseFilter: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var displayName: String {
         switch self {
-        case .upcoming: return "Upcoming"; case .taken: return "Taken"
-        case .missed: return "Missed"; case .needsConfirmation: return "Confirm"
+        case .upcoming: return String(localized: "Upcoming"); case .taken: return String(localized: "Taken")
+        case .missed: return String(localized: "Missed"); case .needsConfirmation: return String(localized: "Confirm")
         }
     }
 }

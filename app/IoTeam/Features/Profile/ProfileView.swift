@@ -151,7 +151,7 @@ private struct AvatarCircle: View {
 
 struct ProfileMenuRow: View {
     let iconName: String
-    let title: String
+    let title: LocalizedStringKey
     var value: String? = nil
     let showDivider: Bool
 

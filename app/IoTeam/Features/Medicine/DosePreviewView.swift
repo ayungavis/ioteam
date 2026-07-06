@@ -63,7 +63,7 @@ private struct SummaryCard: View {
 }
 
 private struct SummaryRowView: View {
-    let title: String; let value: String
+    let title: LocalizedStringKey; let value: String
     var body: some View {
         HStack { Text(title).font(.system(size: 15)).foregroundColor(.brandTextSecondary); Spacer(); Text(value).font(.system(size: 15, weight: .medium)).foregroundColor(.brandTextPrimary) }
     }

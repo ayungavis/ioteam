@@ -301,7 +301,7 @@ private struct EditMedicineDetail: View {
                         get: { viewModel.medicineStatus == .active },
                         set: { viewModel.medicineStatus = $0 ? .active : .disabled }
                     )) {
-                        Text(viewModel.medicineStatus == .active ? "Enabled" : "Disabled")
+                        Text(viewModel.medicineStatus == .active ? String(localized: "Enabled") : String(localized: "Disabled"))
                             .font(.system(size: 16)).foregroundColor(.brandTextPrimary)
                     }
                     .tint(Color.brandSuccess)
@@ -417,7 +417,7 @@ private struct QuantityInputField: View {
 }
 
 private struct FormField<Content: View>: View {
-    let label: String
+    let label: LocalizedStringKey
     @ViewBuilder var content: Content
 
     var body: some View {
@@ -431,7 +431,7 @@ private struct FormField<Content: View>: View {
 }
 
 private struct SummaryRow: View {
-    let title: String
+    let title: LocalizedStringKey
     let value: String
 
     var body: some View {
@@ -471,8 +471,8 @@ private struct DoseStatusBadge: View {
 
     var displayName: String {
         switch status {
-        case "taken": return "Taken"; case "missed": return "Missed"
-        case "due": return "Due"; case "needs_confirmation": return "Needs Confirmation"
+        case "taken": return String(localized: "Taken"); case "missed": return String(localized: "Missed")
+        case "due": return String(localized: "Due"); case "needs_confirmation": return String(localized: "Needs Confirmation")
         default: return status.prefix(1).uppercased() + status.dropFirst()
         }
     }

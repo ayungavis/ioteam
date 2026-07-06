@@ -14,9 +14,9 @@ public enum MedicineFrequency: String, Codable, Sendable, CaseIterable, Identifi
 
     public var displayName: String {
         switch self {
-        case .daily: return "Daily"
-        case .weekly: return "Weekly"
-        case .hourly: return "Hourly"
+        case .daily: return String(localized: "Daily")
+        case .weekly: return String(localized: "Weekly")
+        case .hourly: return String(localized: "Hourly")
         }
     }
 }
@@ -32,13 +32,13 @@ public enum DoseStatus: String, Codable, Sendable, CaseIterable {
 
     public var displayName: String {
         switch self {
-        case .pending: return "Pending"
-        case .due: return "Due"
-        case .taken: return "Taken"
-        case .missed: return "Missed"
-        case .skipped: return "Skipped"
-        case .needsConfirmation: return "Needs Confirmation"
-        case .disabled: return "Disabled"
+        case .pending: return String(localized: "Pending")
+        case .due: return String(localized: "Due")
+        case .taken: return String(localized: "Taken")
+        case .missed: return String(localized: "Missed")
+        case .skipped: return String(localized: "Skipped")
+        case .needsConfirmation: return String(localized: "Needs Confirmation")
+        case .disabled: return String(localized: "Disabled")
         }
     }
 }
