@@ -1,0 +1,141 @@
+digraph DeviceConnectionFlow {
+  graph [
+    rankdir=LR,
+    fontsize=12,
+    fontname="Helvetica",
+    label="DoseLatch Device Connection Flow",
+    labelloc=t,
+    nodesep=0.5,
+    ranksep=0.9,
+    pad=0.2
+  ];
+
+  node [
+    shape=box,
+    style="rounded,filled",
+    fillcolor=white,
+    color="#5B6470",
+    fontname="Helvetica",
+    fontsize=11,
+    margin="0.12,0.08"
+  ];
+
+  edge [
+    color="#3D4852",
+    fontname="Helvetica",
+    fontsize=10,
+    arrowsize=0.8
+  ];
+
+  subgraph cluster_user {
+    label="User";
+    color="#D7DEE7";
+    style="rounded";
+    fillcolor="#F8FAFC";
+
+    user_add [label="Tap Add Device"];
+    user_fill [label="Choose BLE device\nEnter name + Wi-Fi"];
+    user_home [label="Open Device List"];
+    user_delete [label="Delete Device"];
+  }
+
+  subgraph cluster_app {
+    label="iOS App";
+    color="#BFD7FF";
+    style="rounded";
+    fillcolor="#EEF6FF";
+
+    app_scan [label="Scan BLE peripherals"];
+    app_join_wifi [label="Join target Wi-Fi\nif needed"];
+    app_pair_token [label="POST /devices/pairing-token"];
+    app_ble_write [label="Write BLE pair command\npairingToken + deviceName + Wi-Fi + backend URL"];
+    app_poll_devices [label="Poll GET /devices\nuntil hardwareId appears"];
+    app_save_local [label="Save local DeviceSummary\nand selected device"];
+    app_get_devices [label="Refresh GET /devices"];
+    app_render_list [label="Render device list"];
+    app_delete_device [label="DELETE /devices/{id}"];
+  }
+
+  subgraph cluster_backend {
+    label="Backend";
+    color="#C7E7C8";
+    style="rounded";
+    fillcolor="#F1FBF1";
+
+    be_issue_pairing [label="Validate user auth\nIssue family-scoped pairing token"];
+    be_register [label="POST /devices/register"];
+    be_create_device [label="Validate pairing token\nCreate device\nIssue device token"];
+    be_list_devices [label="GET /devices"];
+    be_return_devices [label="Return family devices"];
+    be_delete_device [label="Authorize family member\nSoft-delete device"];
+    be_ingest_event [label="POST /devices/{id}/events"];
+    be_store_event [label="Validate device token\nDebounce event\nStore event + update lastSeenAt"];
+  }
+
+  subgraph cluster_firmware {
+    label="DoseLatch Firmware";
+    color="#FFD8A8";
+    style="rounded";
+    fillcolor="#FFF7ED";
+
+    fw_receive_pair [label="Receive BLE pair command"];
+    fw_store_config [label="Persist Wi-Fi + pairing token\nClear old backend identity"];
+    fw_connect_wifi [label="Connect to Wi-Fi"];
+    fw_register [label="Call POST /devices/register"];
+    fw_store_identity [label="Store backend device ID\nand device token"];
+    fw_advertise [label="Advertise as paired device"];
+    fw_reed_event [label="Reed switch open/close"];
+    fw_queue_event [label="Queue event\nEnsure registration exists"];
+    fw_upload_event [label="Call POST /devices/{id}/events\nwith device bearer token"];
+  }
+
+  user_add -> app_scan [label="start onboarding"];
+  app_scan -> user_fill [label="show nearby devices"];
+  user_fill -> app_join_wifi;
+  app_join_wifi -> app_pair_token;
+  app_pair_token -> be_issue_pairing;
+  be_issue_pairing -> app_ble_write [label="pairing token"];
+  app_ble_write -> fw_receive_pair [label="BLE write"];
+  fw_receive_pair -> fw_store_config;
+  fw_store_config -> fw_connect_wifi;
+  fw_connect_wifi -> fw_register;
+  fw_register -> be_register [label="pairingToken + hardwareId + name"];
+  be_register -> be_create_device;
+  be_create_device -> fw_store_identity [label="device.id + deviceToken"];
+  fw_store_identity -> fw_advertise;
+  fw_store_identity -> app_poll_devices [style=dashed, label="device now exists in backend"];
+  app_poll_devices -> be_list_devices [style=dashed];
+  be_list_devices -> be_return_devices;
+  be_return_devices -> app_save_local [style=dashed, label="match by hardwareId"];
+
+  fw_reed_event -> fw_queue_event;
+  fw_queue_event -> fw_upload_event;
+  fw_upload_event -> be_ingest_event [label="device token auth"];
+  be_ingest_event -> be_store_event;
+  be_store_event -> app_get_devices [style=dashed, label="visible on next refresh"];
+
+  user_home -> app_get_devices;
+  app_get_devices -> be_list_devices;
+  be_return_devices -> app_render_list;
+
+  user_delete -> app_delete_device;
+  app_delete_device -> be_delete_device;
+  be_delete_device -> app_render_list [label="removed after refresh/local delete"];
+
+  note_delete [
+    shape=note,
+    fillcolor="#FFF9DB",
+    color="#D69E2E",
+    label="Delete is backend-side only.\nFirmware is not wiped or unpaired\nby DELETE /devices/{id}."
+  ];
+
+  note_events [
+    shape=note,
+    fillcolor="#FFF9DB",
+    color="#D69E2E",
+    label="Event ingestion stores raw reed-switch events.\nDose matching is intentionally not done\ninside /devices/{id}/events."
+  ];
+
+  be_delete_device -> note_delete [style=dotted, arrowhead=none];
+  be_store_event -> note_events [style=dotted, arrowhead=none];
+}

@@ -7,7 +7,9 @@
 
 #include "cJSON.h"
 #include "esp_check.h"
+#include "esp_crt_bundle.h"
 #include "esp_event.h"
+#include "esp_http_client.h"
 #include "esp_log.h"
 #include "esp_mac.h"
 #include "esp_netif.h"
@@ -39,13 +41,15 @@
 
 #define DEVICE_ID_LENGTH 37
 #define TOKEN_LENGTH 96
-#define FAMILY_ID_LENGTH 96
+#define DEVICE_NAME_LENGTH 64
 #define WIFI_SSID_LENGTH 33
 #define WIFI_PASSWORD_LENGTH 65
 #define BACKEND_MODE_LENGTH 16
 #define BACKEND_URL_LENGTH 160
+#define BACKEND_DEVICE_ID_LENGTH 37
+#define DEVICE_TOKEN_LENGTH 256
 #define ERROR_LENGTH 128
-#define JSON_BUFFER_LENGTH 384
+#define JSON_BUFFER_LENGTH 512
 #define COMMAND_BUFFER_LENGTH 160
 #define EVENT_QUEUE_LENGTH 16
 #define REED_DEBOUNCE_US 500000
@@ -91,12 +95,14 @@ typedef enum {
 typedef struct {
     char device_id[DEVICE_ID_LENGTH];
     bool paired;
+    char device_name[DEVICE_NAME_LENGTH];
     char pairing_token[TOKEN_LENGTH];
-    char family_id[FAMILY_ID_LENGTH];
     char wifi_ssid[WIFI_SSID_LENGTH];
     char wifi_password[WIFI_PASSWORD_LENGTH];
     char backend_mode[BACKEND_MODE_LENGTH];
     char backend_base_url[BACKEND_URL_LENGTH];
+    char backend_device_id[BACKEND_DEVICE_ID_LENGTH];
+    char device_token[DEVICE_TOKEN_LENGTH];
 } device_config_t;
 
 typedef struct {
@@ -106,7 +112,7 @@ typedef struct {
 
 typedef struct {
     char pairing_token[TOKEN_LENGTH];
-    char family_id[FAMILY_ID_LENGTH];
+    char device_name[DEVICE_NAME_LENGTH];
     char wifi_ssid[WIFI_SSID_LENGTH];
     char wifi_password[WIFI_PASSWORD_LENGTH];
     char backend_mode[BACKEND_MODE_LENGTH];
@@ -190,6 +196,66 @@ static int64_t current_timestamp_ms(void) {
     return esp_timer_get_time() / 1000;
 }
 
+static bool has_real_time(void) {
+    struct timeval now = {0};
+    gettimeofday(&now, NULL);
+    return now.tv_sec > 1735689600;
+}
+
+static int64_t absolute_event_timestamp_ms(int64_t recorded_timestamp_ms) {
+    if (recorded_timestamp_ms > 1735689600000LL) {
+        return recorded_timestamp_ms;
+    }
+
+    if (!has_real_time()) {
+        return 0;
+    }
+
+    int64_t now_epoch_ms = current_timestamp_ms();
+    int64_t now_uptime_ms = esp_timer_get_time() / 1000;
+    int64_t age_ms = now_uptime_ms - recorded_timestamp_ms;
+    if (age_ms < 0) {
+        age_ms = 0;
+    }
+
+    return now_epoch_ms - age_ms;
+}
+
+static esp_err_t format_timestamp_iso8601(int64_t timestamp_ms, char *buffer, size_t buffer_size) {
+    if (timestamp_ms <= 0) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    time_t seconds = (time_t) (timestamp_ms / 1000);
+    int milliseconds = (int) (timestamp_ms % 1000);
+    struct tm time_info = {0};
+    if (gmtime_r(&seconds, &time_info) == NULL) {
+        return ESP_FAIL;
+    }
+
+    size_t written = strftime(buffer, buffer_size, "%Y-%m-%dT%H:%M:%S", &time_info);
+    if (written == 0 || written + 6 >= buffer_size) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    snprintf(buffer + written, buffer_size - written, ".%03dZ", milliseconds);
+    return ESP_OK;
+}
+
+static esp_err_t build_url(char *destination, size_t destination_size, const char *base_url, const char *path) {
+    if (base_url == NULL || path == NULL || destination_size == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const char *separator = base_url[strlen(base_url) - 1] == '/' ? "" : "/";
+    int written = snprintf(destination, destination_size, "%s%s%s", base_url, separator, path);
+    if (written < 0 || (size_t) written >= destination_size) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    return ESP_OK;
+}
+
 static void set_last_error(const char *message) {
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
     safe_copy(s_last_error, sizeof(s_last_error), message);
@@ -253,12 +319,14 @@ static esp_err_t storage_save_config(void) {
 
     ESP_GOTO_ON_ERROR(nvs_set_str(handle, "device_id", s_config.device_id), finish, TAG_STORAGE, "Failed to save device_id");
     ESP_GOTO_ON_ERROR(nvs_set_u8(handle, "paired", s_config.paired ? 1 : 0), finish, TAG_STORAGE, "Failed to save paired");
+    ESP_GOTO_ON_ERROR(nvs_set_str(handle, "device_name", s_config.device_name), finish, TAG_STORAGE, "Failed to save device name");
     ESP_GOTO_ON_ERROR(nvs_set_str(handle, "pair_token", s_config.pairing_token), finish, TAG_STORAGE, "Failed to save pair token");
-    ESP_GOTO_ON_ERROR(nvs_set_str(handle, "family_id", s_config.family_id), finish, TAG_STORAGE, "Failed to save family id");
     ESP_GOTO_ON_ERROR(nvs_set_str(handle, "wifi_ssid", s_config.wifi_ssid), finish, TAG_STORAGE, "Failed to save wifi ssid");
     ESP_GOTO_ON_ERROR(nvs_set_str(handle, "wifi_pass", s_config.wifi_password), finish, TAG_STORAGE, "Failed to save wifi password");
     ESP_GOTO_ON_ERROR(nvs_set_str(handle, "backend_mode", s_config.backend_mode), finish, TAG_STORAGE, "Failed to save backend mode");
     ESP_GOTO_ON_ERROR(nvs_set_str(handle, "backend_url", s_config.backend_base_url), finish, TAG_STORAGE, "Failed to save backend url");
+    ESP_GOTO_ON_ERROR(nvs_set_str(handle, "backend_id", s_config.backend_device_id), finish, TAG_STORAGE, "Failed to save backend device id");
+    ESP_GOTO_ON_ERROR(nvs_set_str(handle, "device_token", s_config.device_token), finish, TAG_STORAGE, "Failed to save device token");
     ESP_GOTO_ON_ERROR(nvs_commit(handle), finish, TAG_STORAGE, "Failed to commit NVS");
 
 finish:
@@ -273,12 +341,14 @@ static esp_err_t storage_load_config(void) {
 
     memset(&s_config, 0, sizeof(s_config));
     ESP_GOTO_ON_ERROR(storage_load_string(handle, "device_id", s_config.device_id, sizeof(s_config.device_id)), finish, TAG_STORAGE, "Failed to load device_id");
+    ESP_GOTO_ON_ERROR(storage_load_string(handle, "device_name", s_config.device_name, sizeof(s_config.device_name)), finish, TAG_STORAGE, "Failed to load device name");
     ESP_GOTO_ON_ERROR(storage_load_string(handle, "pair_token", s_config.pairing_token, sizeof(s_config.pairing_token)), finish, TAG_STORAGE, "Failed to load pair token");
-    ESP_GOTO_ON_ERROR(storage_load_string(handle, "family_id", s_config.family_id, sizeof(s_config.family_id)), finish, TAG_STORAGE, "Failed to load family id");
     ESP_GOTO_ON_ERROR(storage_load_string(handle, "wifi_ssid", s_config.wifi_ssid, sizeof(s_config.wifi_ssid)), finish, TAG_STORAGE, "Failed to load wifi ssid");
     ESP_GOTO_ON_ERROR(storage_load_string(handle, "wifi_pass", s_config.wifi_password, sizeof(s_config.wifi_password)), finish, TAG_STORAGE, "Failed to load wifi password");
     ESP_GOTO_ON_ERROR(storage_load_string(handle, "backend_mode", s_config.backend_mode, sizeof(s_config.backend_mode)), finish, TAG_STORAGE, "Failed to load backend mode");
     ESP_GOTO_ON_ERROR(storage_load_string(handle, "backend_url", s_config.backend_base_url, sizeof(s_config.backend_base_url)), finish, TAG_STORAGE, "Failed to load backend url");
+    ESP_GOTO_ON_ERROR(storage_load_string(handle, "backend_id", s_config.backend_device_id, sizeof(s_config.backend_device_id)), finish, TAG_STORAGE, "Failed to load backend device id");
+    ESP_GOTO_ON_ERROR(storage_load_string(handle, "device_token", s_config.device_token, sizeof(s_config.device_token)), finish, TAG_STORAGE, "Failed to load device token");
 
     uint8_t paired = 0;
     ret = nvs_get_u8(handle, "paired", &paired);
@@ -394,10 +464,11 @@ static void build_device_info_json(char *buffer, size_t buffer_size) {
     snprintf(
         buffer,
         buffer_size,
-        "{\"deviceId\":\"%s\",\"firmwareVersion\":\"0.2.0\",\"paired\":%s,"
+        "{\"deviceId\":\"%s\",\"deviceName\":\"%s\",\"firmwareVersion\":\"0.2.0\",\"paired\":%s,"
         "\"reedState\":\"%s\",\"wifiState\":\"%s\",\"provisioningState\":\"%s\","
         "\"lastError\":\"%s\"}",
         s_config.device_id,
+        s_config.device_name,
         s_config.paired ? "true" : "false",
         reed_state_label(s_current_is_open),
         wifi_state_label(s_wifi_state),
@@ -476,18 +547,20 @@ static esp_err_t copy_json_string(cJSON *object, const char *key, char *destinat
 }
 
 static esp_err_t apply_pair_command(const pair_command_t *command) {
-    if (command->wifi_ssid[0] == '\0' || command->pairing_token[0] == '\0' || command->family_id[0] == '\0') {
+    if (command->wifi_ssid[0] == '\0' || command->pairing_token[0] == '\0' || command->device_name[0] == '\0') {
         return ESP_ERR_INVALID_ARG;
     }
 
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    safe_copy(s_config.device_name, sizeof(s_config.device_name), command->device_name);
     safe_copy(s_config.pairing_token, sizeof(s_config.pairing_token), command->pairing_token);
-    safe_copy(s_config.family_id, sizeof(s_config.family_id), command->family_id);
     safe_copy(s_config.wifi_ssid, sizeof(s_config.wifi_ssid), command->wifi_ssid);
     safe_copy(s_config.wifi_password, sizeof(s_config.wifi_password), command->wifi_password);
     safe_copy(s_config.backend_mode, sizeof(s_config.backend_mode), command->backend_mode);
     safe_copy(s_config.backend_base_url, sizeof(s_config.backend_base_url), command->backend_base_url);
-    s_config.paired = true;
+    s_config.paired = false;
+    s_config.backend_device_id[0] = '\0';
+    s_config.device_token[0] = '\0';
     s_provisioning_state = PROVISIONING_STATE_PROVISIONING;
     xSemaphoreGive(s_state_mutex);
 
@@ -538,7 +611,7 @@ static int pair_command_access(uint16_t conn_handle, uint16_t attr_handle, struc
     pair_command_t command = {0};
     esp_err_t error = copy_json_string(root, "pairingToken", command.pairing_token, sizeof(command.pairing_token), true);
     if (error == ESP_OK) {
-        error = copy_json_string(root, "familyId", command.family_id, sizeof(command.family_id), true);
+        error = copy_json_string(root, "deviceName", command.device_name, sizeof(command.device_name), true);
     }
     if (error == ESP_OK) {
         error = copy_json_string(root, "wifiSSID", command.wifi_ssid, sizeof(command.wifi_ssid), true);
@@ -571,7 +644,7 @@ static int pair_command_access(uint16_t conn_handle, uint16_t attr_handle, struc
         return BLE_ATT_ERR_UNLIKELY;
     }
 
-    ESP_LOGI(TAG_BLE, "Pair command accepted for family=%s ssid=%s", command.family_id, command.wifi_ssid);
+    ESP_LOGI(TAG_BLE, "Pair command accepted for device=%s ssid=%s", command.device_name, command.wifi_ssid);
     return 0;
 }
 
@@ -746,6 +819,146 @@ static void reed_task(void *argument) {
     }
 }
 
+static esp_err_t http_post_json(const char *url, const char *bearer_token, const char *payload, char *response_buffer, size_t response_buffer_size) {
+    esp_http_client_config_t config = {
+        .url = url,
+        .method = HTTP_METHOD_POST,
+        .timeout_ms = 15000,
+        .crt_bundle_attach = esp_crt_bundle_attach,
+    };
+
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    if (client == NULL) {
+        return ESP_FAIL;
+    }
+
+    esp_http_client_set_header(client, "Content-Type", "application/json");
+    esp_http_client_set_header(client, "Accept", "application/json");
+    if (bearer_token != NULL && bearer_token[0] != '\0') {
+        char auth_header[DEVICE_TOKEN_LENGTH + 16] = {0};
+        snprintf(auth_header, sizeof(auth_header), "Bearer %s", bearer_token);
+        esp_http_client_set_header(client, "Authorization", auth_header);
+    }
+    esp_http_client_set_post_field(client, payload, strlen(payload));
+
+    esp_err_t error = esp_http_client_perform(client);
+    if (error != ESP_OK) {
+        esp_http_client_cleanup(client);
+        return error;
+    }
+
+    int status_code = esp_http_client_get_status_code(client);
+    int content_length = esp_http_client_get_content_length(client);
+
+    if (response_buffer != NULL && response_buffer_size > 0) {
+        memset(response_buffer, 0, response_buffer_size);
+        int total_read = 0;
+        while (total_read < (int) response_buffer_size - 1) {
+            int bytes_read = esp_http_client_read(
+                client,
+                response_buffer + total_read,
+                (int) response_buffer_size - 1 - total_read
+            );
+            if (bytes_read <= 0) {
+                break;
+            }
+            total_read += bytes_read;
+            if (content_length > 0 && total_read >= content_length) {
+                break;
+            }
+        }
+        response_buffer[total_read] = '\0';
+    }
+
+    esp_http_client_cleanup(client);
+    if (status_code < 200 || status_code >= 300) {
+        ESP_LOGW(TAG_QUEUE, "HTTP request failed status=%d body=%s", status_code, response_buffer != NULL ? response_buffer : "");
+        return ESP_FAIL;
+    }
+
+    return ESP_OK;
+}
+
+static esp_err_t register_device_with_backend(void) {
+    if (strcmp(s_config.backend_mode, "http") != 0 || s_config.backend_base_url[0] == '\0') {
+        s_config.paired = true;
+        s_provisioning_state = PROVISIONING_STATE_PROVISIONED;
+        return storage_save_config();
+    }
+
+    char url[BACKEND_URL_LENGTH + 32] = {0};
+    ESP_RETURN_ON_ERROR(build_url(url, sizeof(url), s_config.backend_base_url, "devices/register"), TAG_QUEUE, "Failed to build register url");
+
+    char payload[JSON_BUFFER_LENGTH] = {0};
+    snprintf(
+        payload,
+        sizeof(payload),
+        "{\"pairingToken\":\"%s\",\"hardwareId\":\"%s\",\"name\":\"%s\","
+        "\"firmwareVersion\":\"0.2.0\",\"connectionType\":\"bluetooth\"}",
+        s_config.pairing_token,
+        s_config.device_id,
+        s_config.device_name
+    );
+
+    char response_buffer[JSON_BUFFER_LENGTH] = {0};
+    ESP_RETURN_ON_ERROR(http_post_json(url, NULL, payload, response_buffer, sizeof(response_buffer)), TAG_QUEUE, "Failed to register device");
+
+    cJSON *root = cJSON_Parse(response_buffer);
+    if (root == NULL) {
+        return ESP_FAIL;
+    }
+
+    cJSON *data = cJSON_GetObjectItemCaseSensitive(root, "data");
+    cJSON *device = data != NULL ? cJSON_GetObjectItemCaseSensitive(data, "device") : NULL;
+    esp_err_t error = copy_json_string(device, "id", s_config.backend_device_id, sizeof(s_config.backend_device_id), true);
+    if (error == ESP_OK && data != NULL) {
+        error = copy_json_string(data, "deviceToken", s_config.device_token, sizeof(s_config.device_token), true);
+    }
+    cJSON_Delete(root);
+    if (error != ESP_OK) {
+        return error;
+    }
+
+    s_config.paired = true;
+    s_provisioning_state = PROVISIONING_STATE_PROVISIONED;
+    clear_last_error();
+    ESP_RETURN_ON_ERROR(storage_save_config(), TAG_STORAGE, "Failed to persist device registration");
+    notify_device_info();
+    start_advertising();
+    return ESP_OK;
+}
+
+static esp_err_t upload_event_to_backend(const device_event_t *event) {
+    if (s_config.backend_device_id[0] == '\0' || s_config.device_token[0] == '\0') {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    int64_t absolute_timestamp_ms = absolute_event_timestamp_ms(event->timestamp_ms);
+    char timestamp_buffer[40] = {0};
+    ESP_RETURN_ON_ERROR(format_timestamp_iso8601(absolute_timestamp_ms, timestamp_buffer, sizeof(timestamp_buffer)), TAG_QUEUE, "Failed to format event timestamp");
+
+    char url[BACKEND_URL_LENGTH + 64] = {0};
+    char path[80] = {0};
+    snprintf(path, sizeof(path), "devices/%s/events", s_config.backend_device_id);
+    ESP_RETURN_ON_ERROR(build_url(url, sizeof(url), s_config.backend_base_url, path), TAG_QUEUE, "Failed to build event url");
+
+    char payload[JSON_BUFFER_LENGTH] = {0};
+    snprintf(
+        payload,
+        sizeof(payload),
+        "{\"eventType\":\"%s\",\"deviceTimestamp\":\"%s\",\"firmwareVersion\":\"0.2.0\","
+        "\"raw_payload\":\"{\\\"deviceId\\\":\\\"%s\\\",\\\"eventType\\\":\\\"%s\\\",\\\"timestamp\\\":\\\"%s\\\"}\"}",
+        reed_state_label(event->is_open),
+        timestamp_buffer,
+        s_config.device_id,
+        reed_state_label(event->is_open),
+        timestamp_buffer
+    );
+
+    char response_buffer[JSON_BUFFER_LENGTH] = {0};
+    return http_post_json(url, s_config.device_token, payload, response_buffer, sizeof(response_buffer));
+}
+
 static void upload_task(void *argument) {
     device_event_t event = {0};
 
@@ -756,28 +969,38 @@ static void upload_task(void *argument) {
             continue;
         }
 
+        if (!s_config.paired || s_config.backend_device_id[0] == '\0' || s_config.device_token[0] == '\0') {
+            esp_err_t registration_error = register_device_with_backend();
+            if (registration_error != ESP_OK) {
+                set_last_error("Backend registration failed");
+                s_provisioning_state = PROVISIONING_STATE_FAILED;
+                notify_device_info();
+                ESP_LOGW(TAG_QUEUE, "Backend registration failed err=0x%x", registration_error);
+                vTaskDelay(pdMS_TO_TICKS(2000));
+                continue;
+            }
+        }
+
+        if (!has_real_time()) {
+            vTaskDelay(pdMS_TO_TICKS(500));
+            continue;
+        }
+
         if (xQueueReceive(s_event_queue, &event, pdMS_TO_TICKS(1000)) != pdPASS) {
             continue;
         }
 
-        char payload[JSON_BUFFER_LENGTH] = {0};
-        snprintf(
-            payload,
-            sizeof(payload),
-            "{\"deviceId\":\"%s\",\"eventType\":\"%s\",\"timestamp\":\"%lld\","
-            "\"firmwareVersion\":\"0.2.0\"}",
-            s_config.device_id,
-            reed_state_label(event.is_open),
-            (long long) event.timestamp_ms
-        );
-
         if (strcmp(s_config.backend_mode, "http") == 0 && s_config.backend_base_url[0] != '\0') {
-            // ponytail: keep the uploader interface stable now; swap this log-only branch for esp_http_client when the backend contract exists.
-            ESP_LOGW(TAG_QUEUE, "HTTP backend not implemented yet, payload=%s url=%s", payload, s_config.backend_base_url);
-            continue;
+            esp_err_t upload_error = upload_event_to_backend(&event);
+            if (upload_error != ESP_OK) {
+                enqueue_device_event(event);
+                ESP_LOGW(TAG_QUEUE, "Event upload failed err=0x%x", upload_error);
+                vTaskDelay(pdMS_TO_TICKS(2000));
+                continue;
+            }
+        } else {
+            ESP_LOGI(TAG_QUEUE, "Mock backend accepted event=%s", reed_state_label(event.is_open));
         }
-
-        ESP_LOGI(TAG_QUEUE, "Mock backend accepted payload=%s", payload);
     }
 }
 

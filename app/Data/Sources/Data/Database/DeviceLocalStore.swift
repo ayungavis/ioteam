@@ -33,6 +33,19 @@ public actor DeviceLocalStore {
         try modelContext.save()
     }
 
+    public func replaceAll(with summaries: [DeviceSummary]) throws {
+        let existing = try fetchAll()
+        let nextIDs = Set(summaries.map(\.id))
+
+        for summary in summaries {
+            try upsert(summary)
+        }
+
+        for device in existing where !nextIDs.contains(device.id) {
+            try delete(deviceID: device.id)
+        }
+    }
+
     public func delete(deviceID: UUID) throws {
         let descriptor = FetchDescriptor<SDDeviceRecord>(predicate: #Predicate { $0.id == deviceID })
         try modelContext.fetch(descriptor).forEach { modelContext.delete($0) }

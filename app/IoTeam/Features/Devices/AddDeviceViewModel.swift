@@ -126,7 +126,7 @@ final class AddDeviceViewModel {
                 passphrase: wifiPassword
             )
 
-            _ = try await pairDeviceUseCase.execute(
+            let pairedDevice = try await pairDeviceUseCase.execute(
                 discoveryID: selectedDeviceID,
                 provisioningInfo: DeviceProvisioningInfo(
                     customName: customName.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -134,6 +134,13 @@ final class AddDeviceViewModel {
                     wifiPassword: wifiPassword
                 )
             )
+            if let familyId = AppSessionStore.shared.familyId {
+                AppSessionStore.shared.saveFamilyAndDevice(
+                    familyId: familyId,
+                    deviceId: pairedDevice.id.uuidString,
+                    deviceName: customName.trimmingCharacters(in: .whitespacesAndNewlines)
+                )
+            }
             return true
         } catch {
             alertMessage = error.localizedDescription

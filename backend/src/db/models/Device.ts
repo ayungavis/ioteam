@@ -19,6 +19,7 @@ class Device extends Model<
   declare connectionType: CreationOptional<DeviceConnectionType>;
   declare status: CreationOptional<DeviceStatus>;
   declare firmwareVersion: CreationOptional<string | null>;
+  declare deviceTokenHash: CreationOptional<string | null>;
   declare lastSeenAt: CreationOptional<Date | null>;
   declare createdAt: CreationOptional<Date>;
   declare updatedAt: CreationOptional<Date>;
@@ -49,6 +50,7 @@ class Device extends Model<
           defaultValue: "active",
         },
         firmwareVersion: { type: DataTypes.STRING, allowNull: true },
+        deviceTokenHash: { type: DataTypes.STRING, allowNull: true },
         lastSeenAt: { type: DataTypes.DATE, allowNull: true },
         createdAt: DataTypes.DATE,
         updatedAt: DataTypes.DATE,

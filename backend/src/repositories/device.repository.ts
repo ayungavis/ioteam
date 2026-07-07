@@ -25,13 +25,14 @@ export const deviceRepository = {
     hardwareId: string;
     connectionType?: DeviceConnectionType;
     firmwareVersion?: string;
+    deviceTokenHash?: string | null;
   }) {
     return Device.create(data);
   },
 
   async update(
     id: string,
-    data: Partial<Pick<Device, "name" | "status" | "firmwareVersion" | "lastSeenAt">>,
+    data: Partial<Pick<Device, "name" | "status" | "firmwareVersion" | "lastSeenAt" | "deviceTokenHash">>,
     transaction?: Transaction
   ) {
     const [, rows] = await Device.update(data, {

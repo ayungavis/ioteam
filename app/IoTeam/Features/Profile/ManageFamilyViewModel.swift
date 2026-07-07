@@ -6,7 +6,6 @@ struct FamilyUseCases {
     let getCurrentFamily: GetCurrentFamilyUseCase
     let createFamily: CreateFamilyUseCase
     let joinFamily: JoinFamilyUseCase
-    let registerDevice: RegisterDeviceUseCase
     let refreshInviteCode: RefreshInviteCodeUseCase
     let removeMember: RemoveMemberUseCase
     let renameFamily: RenameFamilyUseCase
@@ -134,7 +133,7 @@ final class ManageFamilyViewModel {
     }
 
     private func finishSetup(familyId: String) async throws {
-        let device = try await useCases.registerDevice.execute(deviceName: "Default Pill Box")
-        AppSessionStore.shared.saveFamilyAndDevice(familyId: familyId, deviceId: device.id, deviceName: device.name)
+        AppSessionStore.shared.saveFamily(familyId)
+        AppSessionStore.shared.clearDeviceSelection()
     }
 }
