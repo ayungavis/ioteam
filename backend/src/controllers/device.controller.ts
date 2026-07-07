@@ -8,7 +8,7 @@ export async function listDevices(
   req: AuthenticatedRequest,
   res: Response,
 ): Promise<void> {
-  const devices = await deviceService.listDevices(req.userId);
+  const devices = await deviceService.listDevices(req.userId ?? "");
   res.json({ success: true, data: devices });
 }
 
@@ -17,7 +17,7 @@ export async function createPairingToken(
   req: AuthenticatedRequest,
   res: Response,
 ): Promise<void> {
-  const result = await deviceService.generatePairingToken(req.userId);
+  const result = await deviceService.generatePairingToken(req.userId ?? "");
   res.json({ success: true, data: result });
 }
 
@@ -26,21 +26,23 @@ export async function registerDevice(
   req: AuthenticatedRequest,
   res: Response,
 ): Promise<void> {
-  const { hardwareId, name, firmwareVersion, connectionType } = req.body as {
+  const { pairingToken, hardwareId, name, firmwareVersion, connectionType } = req.body as {
+    pairingToken: string;
     hardwareId: string;
     name: string;
     firmwareVersion?: string;
     connectionType?: DeviceConnectionType;
   };
 
-  const device = await deviceService.registerDevice(req.userId, {
+  const result = await deviceService.registerDevice({
+    pairingToken,
     hardwareId,
     name,
     firmwareVersion,
     connectionType,
   });
 
-  res.status(201).json({ success: true, data: device });
+  res.status(201).json({ success: true, data: result });
 }
 
 // PATCH /devices/:id
@@ -54,7 +56,7 @@ export async function updateDevice(
     status?: "active" | "disabled";
   };
 
-  const device = await deviceService.updateDevice(req.userId, id, {
+  const device = await deviceService.updateDevice(req.userId ?? "", id, {
     name,
     status,
   });
@@ -67,7 +69,7 @@ export async function deleteDevice(
   res: Response,
 ): Promise<void> {
   const { id } = req.params as { id: string };
-  await deviceService.deleteDevice(req.userId, id);
+  await deviceService.deleteDevice(req.userId ?? "", id);
   res.json({ success: true });
 }
 
@@ -87,7 +89,7 @@ export async function ingestDeviceEvent(
       raw_payload?: string;
     };
 
-  const result = await deviceService.ingestDeviceEvent(id, {
+  const result = await deviceService.ingestDeviceEvent(req.deviceId ?? "", id, {
     eventType,
     deviceTimestamp,
     firmwareVersion,

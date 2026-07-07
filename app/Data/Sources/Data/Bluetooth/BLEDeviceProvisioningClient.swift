@@ -11,7 +11,7 @@ struct BLEDeviceInfoPayload: Codable, Sendable, Equatable {
 
 struct BLEPairCommandPayload: Codable, Sendable, Equatable {
     let pairingToken: String
-    let familyId: String
+    let deviceName: String
     let wifiSSID: String
     let wifiPassword: String
     let backendMode: String
@@ -128,7 +128,7 @@ private enum DoseLatchBLE {
 private struct PairingSession {
     let peripheralID: UUID
     let pairingToken: String
-    let familyId: String
+    let deviceName: String
     let wifiSSID: String
     let wifiPassword: String
     let backendMode: String
@@ -191,9 +191,9 @@ public final class BLEDeviceProvisioningClient: NSObject, @unchecked Sendable, C
     func pairDevice(
         id: UUID,
         pairingToken: String,
-        familyId: String,
         wifiSSID: String,
         wifiPassword: String,
+        deviceName: String,
         backendMode: String,
         backendBaseURL: String?
     ) async throws -> BLEDeviceInfoPayload {
@@ -207,7 +207,7 @@ public final class BLEDeviceProvisioningClient: NSObject, @unchecked Sendable, C
             pairingSession = PairingSession(
                 peripheralID: id,
                 pairingToken: pairingToken,
-                familyId: familyId,
+                deviceName: deviceName,
                 wifiSSID: wifiSSID,
                 wifiPassword: wifiPassword,
                 backendMode: backendMode,
@@ -434,7 +434,7 @@ public final class BLEDeviceProvisioningClient: NSObject, @unchecked Sendable, C
                 let payload = try encode(
                     BLEPairCommandPayload(
                         pairingToken: session.pairingToken,
-                        familyId: session.familyId,
+                        deviceName: session.deviceName,
                         wifiSSID: session.wifiSSID,
                         wifiPassword: session.wifiPassword,
                         backendMode: session.backendMode,

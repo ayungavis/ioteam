@@ -1,4 +1,3 @@
-import { SignJWT } from "jose";
 import { deviceRepository } from "../repositories/device.repository";
 import { familyRepository } from "../repositories/family.repository";
 import {
@@ -6,8 +5,10 @@ import {
   ConflictError,
   ForbiddenError,
   NotFoundError,
+  UnauthorizedError,
 } from "../errors/AppError";
 import { DeviceConnectionType, DeviceEventType } from "../types";
+import { tokenService } from "./token.service";
 
 // Reed-switch bounce can fire multiple times per physical open; drop near-duplicates.
 const DEBOUNCE_MS = 3000;
@@ -24,10 +25,6 @@ function normalizeRawPayload(raw?: string | null): object | null {
     return { raw };
   }
 }
-
-const secret = new TextEncoder().encode(
-  process.env.SESSION_SECRET || "change-me-in-production",
-);
 
 async function assertFamilyMember(userId: string) {
   const membership = await familyRepository.getMembershipByUserId(userId);
@@ -53,27 +50,31 @@ export const deviceService = {
 
   async generatePairingToken(userId: string) {
     const membership = await assertFamilyMember(userId);
-    const token = await new SignJWT({ familyId: membership.familyId })
-      .setProtectedHeader({ alg: "HS256" })
-      .setIssuedAt()
-      .setExpirationTime("10m")
-      .sign(secret);
+    const token = await tokenService.generatePairingToken(membership.familyId);
     return { token, expiresInSeconds: 600 };
   },
 
   async registerDevice(
-    userId: string,
     data: {
+      pairingToken: string;
       hardwareId: string;
       name: string;
       firmwareVersion?: string;
       connectionType?: DeviceConnectionType;
     },
   ) {
+    if (!data.pairingToken) {
+      throw new BadRequestError("pairingToken is required");
+    }
     if (!data.hardwareId) throw new BadRequestError("hardwareId is required");
     if (!data.name) throw new BadRequestError("name is required");
 
-    const membership = await assertFamilyMember(userId);
+    let pairing;
+    try {
+      pairing = await tokenService.verifyPairingToken(data.pairingToken);
+    } catch {
+      throw new UnauthorizedError("Invalid or expired pairing token");
+    }
 
     const existing = await deviceRepository.findByHardwareId(data.hardwareId);
     if (existing)
@@ -81,13 +82,23 @@ export const deviceService = {
         "A device with this hardware ID is already registered",
       );
 
-    return deviceRepository.create({
-      familyId: membership.familyId,
+    const device = await deviceRepository.create({
+      familyId: pairing.familyId,
       name: data.name,
       hardwareId: data.hardwareId,
       firmwareVersion: data.firmwareVersion,
       connectionType: data.connectionType ?? "bluetooth",
     });
+
+    const deviceToken = await tokenService.generateDeviceToken(device.id);
+    const updated = await deviceRepository.update(device.id, {
+      deviceTokenHash: tokenService.hash(deviceToken),
+    });
+
+    return {
+      device: updated ?? device,
+      deviceToken,
+    };
   },
 
   async updateDevice(
@@ -122,6 +133,7 @@ export const deviceService = {
   // Ingests a reed-switch event from an ESP32: debounces, stores the raw event, and
   // refreshes device liveness. Dose matching is intentionally not done here.
   async ingestDeviceEvent(
+    authenticatedDeviceId: string,
     deviceId: string,
     data: {
       eventType: string;
@@ -130,6 +142,10 @@ export const deviceService = {
       rawPayload?: string;
     },
   ) {
+    if (authenticatedDeviceId !== deviceId) {
+      throw new ForbiddenError("Device token does not match the requested device");
+    }
+
     if (data.eventType !== "open" && data.eventType !== "close") {
       throw new BadRequestError("eventType must be 'open' or 'close'");
     }
