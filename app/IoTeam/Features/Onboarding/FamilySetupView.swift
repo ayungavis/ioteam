@@ -125,7 +125,6 @@ private struct JoinFamilySection: View {
         viewModel: FamilySetupViewModel(
             createFamilyUseCase: CreateFamilyUseCase(client: PreviewAPIClient()),
             joinFamilyUseCase: JoinFamilyUseCase(client: PreviewAPIClient()),
-            registerDeviceUseCase: RegisterDeviceUseCase(client: PreviewAPIClient()),
             completeOnboardingUseCase: CompleteOnboardingUseCase(client: PreviewAPIClient())
         )
     )

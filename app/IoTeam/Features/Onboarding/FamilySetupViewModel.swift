@@ -12,18 +12,15 @@ final class FamilySetupViewModel {
 
     private let createFamilyUseCase: CreateFamilyUseCase
     private let joinFamilyUseCase: JoinFamilyUseCase
-    private let registerDeviceUseCase: RegisterDeviceUseCase
     private let completeOnboardingUseCase: CompleteOnboardingUseCase
 
     init(
         createFamilyUseCase: CreateFamilyUseCase,
         joinFamilyUseCase: JoinFamilyUseCase,
-        registerDeviceUseCase: RegisterDeviceUseCase,
         completeOnboardingUseCase: CompleteOnboardingUseCase
     ) {
         self.createFamilyUseCase = createFamilyUseCase
         self.joinFamilyUseCase = joinFamilyUseCase
-        self.registerDeviceUseCase = registerDeviceUseCase
         self.completeOnboardingUseCase = completeOnboardingUseCase
     }
 
@@ -62,8 +59,8 @@ final class FamilySetupViewModel {
     }
 
     private func finishSetup(familyId: String) async throws {
-        let device = try await registerDeviceUseCase.execute(deviceName: "Default Pill Box")
-        AppSessionStore.shared.saveFamilyAndDevice(familyId: familyId, deviceId: device.id, deviceName: device.name)
+        AppSessionStore.shared.saveFamily(familyId)
+        AppSessionStore.shared.clearDeviceSelection()
         let result = try await completeOnboardingUseCase.execute()
         guard result.onboardingCompleted else {
             throw NetworkError.badResponse(statusCode: 200, message: "Could not complete onboarding.")

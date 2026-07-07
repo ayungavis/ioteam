@@ -7,7 +7,6 @@ struct MedicineDetailUseCases {
     let createMedicine: CreateMedicineUseCase
     let getDoses: GetMedicineDosesUseCase
     let listFamilyDevices: ListFamilyDevicesUseCase
-    let registerDevice: RegisterDeviceUseCase
     let getDetail: GetMedicineDetailUseCase
     let update: UpdateMedicineUseCase
     let delete: DeleteMedicineUseCase
@@ -248,28 +247,19 @@ final class MedicineDetailViewModel {
         }
     }
 
-    /// Resolves the deviceId to attach the medicine to. Once real device pairing exists,
-    /// the paired device's id lands in AppSessionStore and steps 2-3 never run —
-    /// delete the fallbacks then (or replace them with a device picker).
+    /// Resolves the deviceId to attach the medicine to from the current session or the family's active devices.
     private func resolveDeviceId() async throws -> String {
-        // 1. A device is already set up (pairing flow or a previous resolution).
         if let deviceId = await MainActor.run(body: { appSessionStore?.deviceId }) { return deviceId }
 
-        // 2. The family already registered a device (e.g. by another member) — reuse it.
         if let device = try await useCases?.listFamilyDevices.execute().first(where: { $0.status == "active" }) {
             await saveResolvedDevice(id: device.id, familyId: device.familyId, name: device.name)
             return device.id
         }
 
-        // 3. TEMPORARY bypass while no physical device is connected:
-        //    register a placeholder device so the backend's required deviceId is satisfied.
-        guard let registerDevice = useCases?.registerDevice else {
-            throw NetworkError.badResponse(statusCode: 0, message: String(localized: "Device not set up. Complete family setup first."))
-        }
-        let placeholderName = selectedDeviceName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let registered = try await registerDevice.execute(deviceName: placeholderName.isEmpty ? "My DoseLatch" : placeholderName)
-        await saveResolvedDevice(id: registered.id, familyId: registered.familyId, name: registered.name)
-        return registered.id
+        throw NetworkError.badResponse(
+            statusCode: 0,
+            message: String(localized: "No active device is available. Add and pair a DoseLatch device first.")
+        )
     }
 
     private func saveResolvedDevice(id: String, familyId: String, name: String) async {

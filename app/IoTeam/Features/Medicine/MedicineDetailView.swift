@@ -8,7 +8,6 @@ struct MedicineDetailView: View {
     @Environment(\.createMedicineUseCase) private var createMedicineUseCase
     @Environment(\.getMedicineDosesUseCase) private var getMedicineDosesUseCase
     @Environment(\.listFamilyDevicesUseCase) private var listFamilyDevicesUseCase
-    @Environment(\.registerDeviceUseCase) private var registerDeviceUseCase
     @Environment(\.getMedicineDetailUseCase) private var getMedicineDetailUseCase
     @Environment(\.updateMedicineUseCase) private var updateMedicineUseCase
     @Environment(\.deleteMedicineUseCase) private var deleteMedicineUseCase
@@ -60,7 +59,6 @@ struct MedicineDetailView: View {
                     createMedicine: createMedicineUseCase,
                     getDoses: getMedicineDosesUseCase,
                     listFamilyDevices: listFamilyDevicesUseCase,
-                    registerDevice: registerDeviceUseCase,
                     getDetail: getMedicineDetailUseCase,
                     update: updateMedicineUseCase,
                     delete: deleteMedicineUseCase,
