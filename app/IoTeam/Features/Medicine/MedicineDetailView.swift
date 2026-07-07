@@ -14,9 +14,11 @@ struct MedicineDetailView: View {
     @Environment(\.deleteMedicineUseCase) private var deleteMedicineUseCase
     @Environment(\.reschedulePreviewUseCase) private var reschedulePreviewUseCase
     @Environment(\.rescheduleMedicineUseCase) private var rescheduleMedicineUseCase
+    @Environment(\.markDoseTakenUseCase) private var markDoseTakenUseCase
     @State private var viewModel: MedicineDetailViewModel
     @State private var isDeleteAlertPresented = false
     @State private var dosePreviewViewModel: DosePreviewViewModel?
+    @State private var historyDose: DoseItem?
     @State private var showErrorAlert = false
 
     init(mode: MedicineDetailViewModel.Mode) {
@@ -48,7 +50,8 @@ struct MedicineDetailView: View {
                                 dosePreviewViewModel = DosePreviewViewModel(doses: result.doses, summary: result.summary, medicineName: viewModel.medicineName, totalQuantity: viewModel.remainingQuantity, scheduleInput: viewModel.buildScheduleInput(), onConfirm: { Task { _ = await viewModel.applyReschedule() } })
                             }
                         },
-                        onDelete: { isDeleteAlertPresented = true }
+                        onDelete: { isDeleteAlertPresented = true },
+                        onSelectDose: { historyDose = $0 }
                     )
                 }
             }
@@ -65,7 +68,8 @@ struct MedicineDetailView: View {
                     update: updateMedicineUseCase,
                     delete: deleteMedicineUseCase,
                     reschedulePreview: reschedulePreviewUseCase,
-                    reschedule: rescheduleMedicineUseCase
+                    reschedule: rescheduleMedicineUseCase,
+                    markDoseTaken: markDoseTakenUseCase
                 ),
                 appSessionStore: AppSessionStore.shared
             )
@@ -74,6 +78,13 @@ struct MedicineDetailView: View {
             showErrorAlert = newValue != nil
         }
         .sheet(item: $dosePreviewViewModel) { vm in NavigationStack { DosePreviewView(viewModel: vm) } }
+        .sheet(item: $historyDose) { dose in
+            DoseDetailSheet(dose: scheduleUIDose(from: dose), onMarkTaken: {
+                Task { _ = await viewModel.markDoseTaken(doseId: dose.id) }
+                historyDose = nil
+            })
+            .presentationDetents([.medium])
+        }
         .alert("Error", isPresented: $showErrorAlert) {
             Button("OK") { viewModel.alertMessage = nil }
         } message: { Text(viewModel.alertMessage ?? "") }
@@ -83,6 +94,23 @@ struct MedicineDetailView: View {
                 Task { if await viewModel.deleteMedicine() { dismiss() } }
             }
         } message: { Text("This will remove the medicine and stop tracking. This action cannot be undone.") }
+    }
+
+    /// Adapts a history DoseItem to the shared DoseDetailSheet model used by the Schedule tab.
+    private func scheduleUIDose(from item: DoseItem) -> ScheduleUIDose {
+        ScheduleUIDose(
+            id: item.id,
+            scheduledAt: item.scheduledAt,
+            windowStartAt: item.windowStartAt,
+            windowEndAt: item.windowEndAt,
+            time: item.scheduledAt.formatted(date: .omitted, time: .shortened),
+            medicineName: viewModel.medicineName,
+            deviceName: viewModel.selectedDeviceName.isEmpty ? "—" : viewModel.selectedDeviceName,
+            amount: item.doseAmount,
+            status: DoseStatus(rawValue: item.status) ?? .pending,
+            actualTakenAt: item.actualTakenAt,
+            takenSource: item.takenSource
+        )
     }
 }
 
@@ -277,6 +305,7 @@ private struct EditMedicineDetail: View {
     let onSave: () -> Void
     let onReviewReschedule: () -> Void
     let onDelete: () -> Void
+    let onSelectDose: (DoseItem) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
@@ -374,7 +403,11 @@ private struct EditMedicineDetail: View {
                             }
                         }
                     }
-                    ForEach(viewModel.filteredDoses) { dose in DoseRow(dose: dose) }
+                    ForEach(viewModel.filteredDoses) { dose in
+                        DoseRow(dose: dose)
+                            .contentShape(Rectangle())
+                            .onTapGesture { onSelectDose(dose) }
+                    }
                 }
             }
 

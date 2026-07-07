@@ -109,6 +109,9 @@ struct HomeTabCoordinatorView: View {
         .id(localeManager.languageCode)
         .environment(tabRouter)
         .task {
+            // Reaching the dashboard means onboarding is done — the right moment to ask
+            // for notification permission (prompts once; no-op when already decided).
+            await notificationManager.requestAuthorizationAfterLogin()
             await notificationManager.refreshRemoteNotificationsIfPossible()
             notificationManager.consumePendingRoute(using: tabRouter)
         }

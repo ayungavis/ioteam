@@ -37,7 +37,8 @@ final class IoTeamAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificati
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        completionHandler([.banner, .list, .sound])
+        let kind = notification.request.content.userInfo["kind"] as? String
+        completionHandler(AppNotificationManager.presentationOptions(forKind: kind))
     }
     
     func userNotificationCenter(

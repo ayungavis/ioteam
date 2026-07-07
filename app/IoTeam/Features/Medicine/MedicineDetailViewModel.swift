@@ -13,6 +13,7 @@ struct MedicineDetailUseCases {
     let delete: DeleteMedicineUseCase
     let reschedulePreview: ReschedulePreviewUseCase
     let reschedule: RescheduleMedicineUseCase
+    let markDoseTaken: MarkDoseTakenUseCase
 }
 
 @Observable
@@ -213,6 +214,21 @@ final class MedicineDetailViewModel {
         guard case .edit(let medicineId) = mode, let useCase = useCases?.delete else { return false }
         do {
             _ = try await useCase.execute(medicineId: medicineId)
+            return true
+        } catch {
+            await MainActor.run { alertMessage = error.localizedDescription }
+            return false
+        }
+    }
+
+    /// Marks a dose from the history list as taken (incl. taking a missed dose late),
+    /// then reloads the doses and detail so status and remaining stock stay accurate.
+    func markDoseTaken(doseId: String) async -> Bool {
+        guard case .edit(let medicineId) = mode, let useCase = useCases?.markDoseTaken else { return false }
+        do {
+            _ = try await useCase.execute(doseId: doseId)
+            loadDoses(medicineId: medicineId)
+            loadDetail(medicineId: medicineId)
             return true
         } catch {
             await MainActor.run { alertMessage = error.localizedDescription }
