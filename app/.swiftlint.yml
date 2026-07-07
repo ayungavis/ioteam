@@ -1,0 +1,12 @@
+disabled_rules:
+  - trailing_whitespace
+opt_in_rules:
+  - empty_count
+  - force_unwrapping
+  - attributes
+
+# Enforce strict line limits for hackathon velocity
+line_length: 120
+function_body_length: 60
+type_body_length: 250
+

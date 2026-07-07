@@ -21,6 +21,11 @@ const swaggerDocument: OpenAPIV3.Document = {
         scheme: "bearer",
         bearerFormat: "JWT",
       },
+      deviceBearerAuth: {
+        type: "http",
+        scheme: "bearer",
+        bearerFormat: "Device JWT",
+      },
     },
     schemas: {
       Error: {
@@ -1186,16 +1191,19 @@ const swaggerDocument: OpenAPIV3.Document = {
         tags: ["Device"],
         summary: "Register a device",
         description:
-          "Registers an ESP32 device to the caller's family after provisioning. hardwareId must be globally unique.",
-        security: [{ bearerAuth: [] }],
+          "Registers an ESP32 device after provisioning using the short-lived pairing token. hardwareId must be globally unique.",
         requestBody: {
           required: true,
           content: {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["hardwareId", "name"],
+                required: ["pairingToken", "hardwareId", "name"],
                 properties: {
+                  pairingToken: {
+                    type: "string",
+                    example: "eyJhbGciOiJIUzI1NiJ9...",
+                  },
                   hardwareId: { type: "string", example: "ESP32-A1B2C3" },
                   name: { type: "string", example: "Kitchen Pill Box" },
                   firmwareVersion: { type: "string", example: "1.0.3" },
@@ -1216,14 +1224,23 @@ const swaggerDocument: OpenAPIV3.Document = {
               "application/json": {
                 schema: {
                   type: "object",
-                  properties: {
-                    success: { type: "boolean", example: true },
-                    data: { $ref: "#/components/schemas/Device" },
+                      properties: {
+                        success: { type: "boolean", example: true },
+                        data: {
+                          type: "object",
+                          properties: {
+                            device: { $ref: "#/components/schemas/Device" },
+                            deviceToken: {
+                              type: "string",
+                              example: "eyJhbGciOiJIUzI1NiJ9...",
+                            },
+                          },
+                        },
+                      },
+                    },
                   },
                 },
               },
-            },
-          },
           "400": {
             description: "Missing hardwareId or name",
             content: {
@@ -1233,7 +1250,7 @@ const swaggerDocument: OpenAPIV3.Document = {
             },
           },
           "401": {
-            description: "Unauthorized",
+            description: "Invalid or expired pairing token",
             content: {
               "application/json": {
                 schema: { $ref: "#/components/schemas/Error" },
@@ -1375,7 +1392,7 @@ const swaggerDocument: OpenAPIV3.Document = {
         summary: "Ingest a device event",
         description:
           "Records a reed-switch open/close event from the ESP32 and refreshes device liveness. Debounces near-duplicate events. Does not perform dose matching.",
-        security: [{ bearerAuth: [] }],
+        security: [{ deviceBearerAuth: [] }],
         parameters: [
           {
             name: "id",

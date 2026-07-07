@@ -1,0 +1,7 @@
+--allman false
+--indent 4
+--self insert
+--semicolons strip
+--stripunusedargs closures
+--wraparguments typeinference
+
