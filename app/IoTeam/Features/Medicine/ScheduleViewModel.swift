@@ -30,12 +30,14 @@ final class ScheduleViewModel {
             let medicines = try await getMedicinesUseCase.execute()
             var allDoses: [ScheduleUIDose] = []
             let calendar = Calendar.current
+            // Matches the week strip: 7 days of history through 7 days ahead.
+            let startDate = calendar.date(byAdding: .day, value: -7, to: calendar.startOfDay(for: Date())) ?? Date()
             let endDate = calendar.date(byAdding: .day, value: 7, to: Date()) ?? Date()
 
             for medicine in medicines {
                 let statusFilter = ["pending", "due", "taken", "missed"]
                 let doseItems = try await getMedicineDosesUseCase.execute(medicineId: medicine.id, statuses: statusFilter)
-                for item in doseItems where item.scheduledAt <= endDate {
+                for item in doseItems where item.scheduledAt >= startDate && item.scheduledAt <= endDate {
                     allDoses.append(ScheduleUIDose(
                         id: item.id,
                         scheduledAt: item.scheduledAt,
@@ -78,6 +80,7 @@ final class ScheduleViewModel {
     }
 
     /// Marks the dose taken on the backend. There is no un-take endpoint, so taken doses stay taken.
+    /// Early (not-yet-due) doses are allowed here — the UI adds a confirmation step first.
     func markTaken(_ dose: ScheduleUIDose) async {
         guard dose.status != .taken else { return }
         guard let idx = doses.firstIndex(where: { $0.id == dose.id }) else { return }

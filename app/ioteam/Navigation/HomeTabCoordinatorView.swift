@@ -13,7 +13,6 @@ import SwiftUI
 struct HomeTabCoordinatorView: View {
     @Environment(LocaleManager.self) private var localeManager
     @Environment(AppNotificationManager.self) private var notificationManager
-    @State private var tabRouter = HomeTabRouter()
     @Environment(\.deviceRepository) private var deviceRepository
     @Environment(\.wiFiProvisioningService) private var wiFiProvisioningService
     @Environment(\.getMedicinesUseCase) private var getMedicinesUseCase
@@ -29,14 +28,19 @@ struct HomeTabCoordinatorView: View {
         let setDeviceEnabledUseCase = SetDeviceEnabledUseCase(repository: deviceRepository)
         let deleteDeviceUseCase = DeleteDeviceUseCase(repository: deviceRepository)
 
-        TabView(selection: $tabRouter.selectedTab) {
-            NavigationStack(path: $tabRouter.homePath) {
+        TabView(selection: Binding(get: { HomeTabRouter.shared.selectedTab }, set: { HomeTabRouter.shared.selectedTab = $0 })) {
+            NavigationStack(path: Binding(get: { HomeTabRouter.shared.homePath }, set: { HomeTabRouter.shared.homePath = $0 })) {
                 HomeView(
                     viewModel: HomeViewModel(
                         observeDevicesUseCase: observeDevicesUseCase,
                         setDeviceEnabledUseCase: setDeviceEnabledUseCase
                     ),
                     doseAttentionViewModel: DoseAttentionViewModel(
+                        getMedicinesUseCase: getMedicinesUseCase,
+                        getMedicineDosesUseCase: getMedicineDosesUseCase,
+                        markDoseTakenUseCase: markDoseTakenUseCase
+                    ),
+                    scheduleViewModel: ScheduleViewModel(
                         getMedicinesUseCase: getMedicinesUseCase,
                         getMedicineDosesUseCase: getMedicineDosesUseCase,
                         markDoseTakenUseCase: markDoseTakenUseCase
@@ -73,7 +77,7 @@ struct HomeTabCoordinatorView: View {
             }
             .tabItem { Label("Home", systemImage: "house") }.tag(AppTab.home)
 
-            NavigationStack(path: $tabRouter.medicinePath) {
+            NavigationStack(path: Binding(get: { HomeTabRouter.shared.medicinePath }, set: { HomeTabRouter.shared.medicinePath = $0 })) {
                 MedicineListView()
                     .tint(Color.brandAccent)
                     .navigationDestination(for: HomeNavigationDestination.self) { destination in
@@ -88,18 +92,7 @@ struct HomeTabCoordinatorView: View {
             .tint(Color.brandAccent)
             .tabItem { Label("Medicine", systemImage: "pills") }.tag(AppTab.medicine)
 
-            NavigationStack(path: $tabRouter.schedulePath) {
-                ScheduleView(viewModel: ScheduleViewModel(
-                    getMedicinesUseCase: getMedicinesUseCase,
-                    getMedicineDosesUseCase: getMedicineDosesUseCase,
-                    markDoseTakenUseCase: markDoseTakenUseCase
-                ))
-                    .tint(Color.brandAccent)
-            }
-            .tint(Color.brandAccent)
-            .tabItem { Label("Schedule", systemImage: "calendar") }.tag(AppTab.schedule)
-
-            NavigationStack(path: $tabRouter.profilePath) {
+            NavigationStack(path: Binding(get: { HomeTabRouter.shared.profilePath }, set: { HomeTabRouter.shared.profilePath = $0 })) {
                 ProfileView(observeDevicesUseCase: observeDevicesUseCase)
             }
             .tint(Color.brandAccent)
@@ -107,13 +100,14 @@ struct HomeTabCoordinatorView: View {
         }
         .tint(Color.brandAccent)
         .id(localeManager.languageCode)
-        .environment(tabRouter)
+        .environment(HomeTabRouter.shared)
         .task {
+            await notificationManager.requestAuthorizationAfterLogin()
             await notificationManager.refreshRemoteNotificationsIfPossible()
-            notificationManager.consumePendingRoute(using: tabRouter)
+            notificationManager.consumePendingRoute(using: HomeTabRouter.shared)
         }
         .onChange(of: notificationManager.pendingRoute) { _, _ in
-            notificationManager.consumePendingRoute(using: tabRouter)
+            notificationManager.consumePendingRoute(using: HomeTabRouter.shared)
         }
     }
 }

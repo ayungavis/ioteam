@@ -13,9 +13,11 @@ struct MedicineDetailView: View {
     @Environment(\.deleteMedicineUseCase) private var deleteMedicineUseCase
     @Environment(\.reschedulePreviewUseCase) private var reschedulePreviewUseCase
     @Environment(\.rescheduleMedicineUseCase) private var rescheduleMedicineUseCase
+    @Environment(\.markDoseTakenUseCase) private var markDoseTakenUseCase
     @State private var viewModel: MedicineDetailViewModel
     @State private var isDeleteAlertPresented = false
     @State private var dosePreviewViewModel: DosePreviewViewModel?
+    @State private var historyDose: DoseItem?
     @State private var showErrorAlert = false
 
     init(mode: MedicineDetailViewModel.Mode) {
@@ -47,7 +49,8 @@ struct MedicineDetailView: View {
                                 dosePreviewViewModel = DosePreviewViewModel(doses: result.doses, summary: result.summary, medicineName: viewModel.medicineName, totalQuantity: viewModel.remainingQuantity, scheduleInput: viewModel.buildScheduleInput(), onConfirm: { Task { _ = await viewModel.applyReschedule() } })
                             }
                         },
-                        onDelete: { isDeleteAlertPresented = true }
+                        onDelete: { isDeleteAlertPresented = true },
+                        onSelectDose: { historyDose = $0 }
                     )
                 }
             }
@@ -71,6 +74,13 @@ struct MedicineDetailView: View {
             showErrorAlert = newValue != nil
         }
         .sheet(item: $dosePreviewViewModel) { vm in NavigationStack { DosePreviewView(viewModel: vm) } }
+        .sheet(item: $historyDose) { dose in
+            DoseDetailSheet(dose: scheduleUIDose(from: dose), onMarkTaken: {
+                Task { _ = await viewModel.markDoseTaken(doseId: dose.id) }
+                historyDose = nil
+            })
+            .presentationDetents([.medium])
+        }
         .alert("Error", isPresented: $showErrorAlert) {
             Button("OK") { viewModel.alertMessage = nil }
         } message: { Text(viewModel.alertMessage ?? "") }
@@ -80,6 +90,23 @@ struct MedicineDetailView: View {
                 Task { if await viewModel.deleteMedicine() { dismiss() } }
             }
         } message: { Text("This will remove the medicine and stop tracking. This action cannot be undone.") }
+    }
+
+    /// Adapts a history DoseItem to the shared DoseDetailSheet model used by the Schedule tab.
+    private func scheduleUIDose(from item: DoseItem) -> ScheduleUIDose {
+        ScheduleUIDose(
+            id: item.id,
+            scheduledAt: item.scheduledAt,
+            windowStartAt: item.windowStartAt,
+            windowEndAt: item.windowEndAt,
+            time: item.scheduledAt.formatted(date: .omitted, time: .shortened),
+            medicineName: viewModel.medicineName,
+            deviceName: viewModel.selectedDeviceName.isEmpty ? "—" : viewModel.selectedDeviceName,
+            amount: item.doseAmount,
+            status: DoseStatus(rawValue: item.status) ?? .pending,
+            actualTakenAt: item.actualTakenAt,
+            takenSource: item.takenSource
+        )
     }
 }
 
@@ -316,6 +343,7 @@ private struct EditMedicineDetail: View {
     let onSave: () -> Void
     let onReviewReschedule: () -> Void
     let onDelete: () -> Void
+    let onSelectDose: (DoseItem) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
@@ -332,6 +360,11 @@ private struct EditMedicineDetail: View {
                     TextField("Enter medicine name", text: $viewModel.medicineName)
                         .textInputAutocapitalization(.words)
                         .formFieldStyle()
+                }
+
+                // Linked Device
+                FormField(label: "Linked Device") {
+                    DevicePickerField(viewModel: viewModel)
                 }
 
                 // Enabled / Disabled
@@ -413,7 +446,31 @@ private struct EditMedicineDetail: View {
                             }
                         }
                     }
-                    ForEach(viewModel.filteredDoses) { dose in DoseRow(dose: dose) }
+                    // Fixed-height box with its own scrolling so a long dose history
+                    // doesn't stretch the whole screen.
+                    Group {
+                        if viewModel.filteredDoses.isEmpty {
+                            Text("No doses here yet.")
+                                .font(.system(size: 14)).foregroundColor(.brandTextSecondary)
+                                .frame(maxWidth: .infinity, alignment: .center)
+                                .padding(.vertical, 40)
+                        } else {
+                            ScrollView {
+                                LazyVStack(spacing: 8) {
+                                    ForEach(viewModel.filteredDoses) { dose in
+                                        DoseRow(dose: dose)
+                                            .contentShape(Rectangle())
+                                            .onTapGesture { onSelectDose(dose) }
+                                    }
+                                }
+                                .padding(12)
+                            }
+                            .frame(height: 320)
+                        }
+                    }
+                    .background(Color.brandSurface)
+                    .cornerRadius(16)
+                    .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.brandBorder, lineWidth: 1))
                 }
             }
 
@@ -423,6 +480,50 @@ private struct EditMedicineDetail: View {
                     .frame(maxWidth: .infinity).frame(height: 50).background(Color.brandCard).cornerRadius(12)
             }.padding(.top, 8)
         }.padding(.horizontal, 24).padding(.bottom, 40)
+    }
+}
+
+/// Menu-based picker over the family's registered devices (from GET /devices).
+/// Shows an explanatory placeholder while the family has no device yet — in that
+/// case medicine creation falls back to auto-registering one.
+private struct DevicePickerField: View {
+    @Bindable var viewModel: MedicineDetailViewModel
+
+    var body: some View {
+        if viewModel.availableDevices.isEmpty {
+            Text("No device yet — one will be set up automatically.")
+                .font(.system(size: 14))
+                .foregroundColor(.brandTextSecondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .formFieldStyle()
+        } else {
+            Menu {
+                ForEach(viewModel.availableDevices) { device in
+                    Button {
+                        viewModel.selectDevice(device)
+                    } label: {
+                        if device.id == viewModel.selectedDeviceId {
+                            Label(device.name, systemImage: "checkmark")
+                        } else {
+                            Text(device.name)
+                        }
+                    }
+                }
+            } label: {
+                HStack {
+                    if let name = viewModel.selectedDeviceDisplayName {
+                        Text(name).font(.system(size: 16)).foregroundColor(.brandTextPrimary)
+                    } else {
+                        Text("Select device").font(.system(size: 16)).foregroundColor(.brandTextTertiary)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 13))
+                        .foregroundColor(.brandTextTertiary)
+                }
+                .formFieldStyle()
+            }
+        }
     }
 }
 
