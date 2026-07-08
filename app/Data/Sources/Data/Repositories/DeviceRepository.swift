@@ -2,6 +2,15 @@ import Domain
 import Foundation
 import SwiftData
 
+public extension Notification.Name {
+    static let devicePairingStatusDidChange = Notification.Name("devicePairingStatusDidChange")
+}
+
+public enum DevicePairingStatusUserInfoKey {
+    public static let peripheralID = "peripheralID"
+    public static let message = "message"
+}
+
 @MainActor
 public final class DeviceRepository: DeviceRepositoryProtocol {
     private let localStore: DeviceLocalStore
@@ -10,6 +19,7 @@ public final class DeviceRepository: DeviceRepositoryProtocol {
     private var scanContinuation: AsyncStream<DeviceScanSnapshot>.Continuation?
     private var deviceContinuations: [UUID: AsyncStream<[DeviceSummary]>.Continuation] = [:]
     private var currentSnapshot: DeviceScanSnapshot
+    private var latestDeviceInfoByPeripheralID: [UUID: BLEDeviceInfoPayload] = [:]
 
     public init(modelContainer: ModelContainer, apiClient: APIClientProtocol, bleClient: BLEDeviceProvisioningClient) {
         self.localStore = DeviceLocalStore(modelContainer: modelContainer)
@@ -30,10 +40,18 @@ public final class DeviceRepository: DeviceRepositoryProtocol {
                 try? await self?.updateDeviceEvent(peripheralID: peripheralID, payload: payload)
             }
         }
+
+        bleClient.onDeviceInfoChanged = { [weak self] peripheralID, payload in
+            Task { @MainActor in
+                self?.latestDeviceInfoByPeripheralID[peripheralID] = payload
+                self?.publishPairingStatus(for: peripheralID, payload: payload)
+            }
+        }
     }
 
     public func getDevices() async throws -> [DeviceSummary] {
-        try await localStore.fetchAll()
+        try? await refreshDevicesFromBackend()
+        return try await localStore.fetchAll()
     }
 
     public func observeDevices() -> AsyncStream<[DeviceSummary]> {
@@ -52,9 +70,7 @@ public final class DeviceRepository: DeviceRepositoryProtocol {
             }
 
             Task { @MainActor in
-                // Publish the local cache immediately, then reconcile with the
-                // family's devices on the backend (covers devices paired by other
-                // family members' phones, which this phone has never seen over BLE).
+                try? await self.refreshDevicesFromBackend()
                 await self.publishDevices()
                 await self.syncWithBackend()
                 await self.publishDevices()
@@ -126,41 +142,62 @@ public final class DeviceRepository: DeviceRepositoryProtocol {
     }
 
     public func pairDevice(discoveryID: UUID, provisioningInfo: DeviceProvisioningInfo) async throws -> DeviceSummary {
+        latestDeviceInfoByPeripheralID.removeValue(forKey: discoveryID)
+        publishPairingStatus(
+            for: discoveryID,
+            message: "Connecting to DoseLatch..."
+        )
+        print(
+            "DoseLatch pairing started peripheral=\(discoveryID.uuidString) "
+                + "ssid=\(provisioningInfo.wifiSSID) backendMode=\(backendMode) "
+                + "backendBaseURLSet=\(backendBaseURL != nil)"
+        )
+
         let tokenResponse: PairingTokenResponse = try await apiClient.request(
             APIEndpoint(path: "devices/pairing-token", method: .post)
+        )
+        let pairingFamilyID = decodePairingTokenFamilyID(tokenResponse.data.token)
+        print(
+            "DoseLatch pairing token received peripheral=\(discoveryID.uuidString) "
+                + "familyId=\(pairingFamilyID ?? "nil") pairingToken=\(tokenResponse.data.token)"
         )
 
         let info = try await bleClient.pairDevice(
             id: discoveryID,
-            pairingToken: tokenResponse.pairingToken,
-            familyId: tokenResponse.familyId,
+            pairingToken: tokenResponse.data.token,
             wifiSSID: provisioningInfo.wifiSSID,
             wifiPassword: provisioningInfo.wifiPassword,
+            deviceName: provisioningInfo.customName,
             backendMode: backendMode,
             backendBaseURL: backendBaseURL
         )
 
-        let requestBody = try JSONEncoder().encode([
-            "device_id": info.deviceId.uuidString,
-            "device_name": provisioningInfo.customName,
-            "peripheral_identifier": discoveryID.uuidString,
-            "firmware_version": info.firmwareVersion
-        ])
-
-        let registered: DeviceSummary = try await apiClient.request(
-            APIEndpoint(path: "devices/register", method: .post, body: requestBody)
+        publishPairingStatus(
+            for: discoveryID,
+            message: "DoseLatch accepted provisioning. Waiting for backend registration..."
         )
 
-        try await localStore.upsert(registered)
+        let device = try await waitForRegisteredDevice(
+            hardwareID: info.deviceId.uuidString,
+            peripheralID: discoveryID,
+            wifiSSID: provisioningInfo.wifiSSID
+        )
+
+        publishPairingStatus(
+            for: discoveryID,
+            message: "DoseLatch is ready."
+        )
         await publishDevices()
-        return registered
+        return device
     }
 
     public func renameDevice(deviceID: UUID, newName: String) async throws -> DeviceSummary {
         let requestBody = try JSONEncoder().encode(["name": newName])
-        let updated: DeviceSummary = try await apiClient.request(
+        let response: FamilyDeviceResponse = try await apiClient.request(
             APIEndpoint(path: "devices/\(deviceID.uuidString)", method: .patch, body: requestBody)
         )
+        let existing = try? await localStore.fetchAll().first(where: { $0.id == deviceID })
+        let updated = makeSummary(from: response.data, existing: existing)
 
         try await localStore.upsert(updated)
         await publishDevices()
@@ -169,9 +206,11 @@ public final class DeviceRepository: DeviceRepositoryProtocol {
 
     public func setDeviceEnabled(deviceID: UUID, isEnabled: Bool) async throws -> DeviceSummary {
         let requestBody = try JSONEncoder().encode(["status": isEnabled ? DeviceStatus.active.rawValue : DeviceStatus.disabled.rawValue])
-        let updated: DeviceSummary = try await apiClient.request(
+        let response: FamilyDeviceResponse = try await apiClient.request(
             APIEndpoint(path: "devices/\(deviceID.uuidString)", method: .patch, body: requestBody)
         )
+        let existing = try? await localStore.fetchAll().first(where: { $0.id == deviceID })
+        let updated = makeSummary(from: response.data, existing: existing)
 
         try await localStore.upsert(updated)
         await publishDevices()
@@ -179,7 +218,7 @@ public final class DeviceRepository: DeviceRepositoryProtocol {
     }
 
     public func deleteDevice(deviceID: UUID) async throws {
-        let _: DeviceSummary = try await apiClient.request(
+        let _: SimpleSuccessResponse = try await apiClient.request(
             APIEndpoint(path: "devices/\(deviceID.uuidString)", method: .delete)
         )
 
@@ -197,6 +236,136 @@ public final class DeviceRepository: DeviceRepositoryProtocol {
         for continuation in deviceContinuations.values {
             continuation.yield(devices)
         }
+    }
+
+    private func refreshDevicesFromBackend(peripheralOverrides: [String: UUID] = [:]) async throws -> [DeviceSummary] {
+        let response: FamilyDeviceListResponse = try await apiClient.request(APIEndpoint(path: "devices", method: .get))
+        let existingDevices = (try? await localStore.fetchAll()) ?? []
+        let existingByID = Dictionary(uniqueKeysWithValues: existingDevices.map { ($0.id.uuidString.lowercased(), $0) })
+        let summaries = response.data.compactMap { remoteDevice in
+            makeSummary(
+                from: remoteDevice,
+                existing: existingByID[remoteDevice.id.lowercased()],
+                peripheralOverride: peripheralOverrides[remoteDevice.id]
+            )
+        }
+        try await localStore.replaceAll(with: summaries)
+        return summaries
+    }
+
+    private func waitForRegisteredDevice(hardwareID: String, peripheralID: UUID, wifiSSID: String) async throws -> DeviceSummary {
+        let deadline = Date().addingTimeInterval(25)
+
+        while Date() < deadline {
+            if let failure = provisioningFailureMessage(for: peripheralID, wifiSSID: wifiSSID) {
+                throw BLEDeviceProvisioningError.pairingFailed(failure)
+            }
+
+            let remoteDevices: FamilyDeviceListResponse = try await apiClient.request(APIEndpoint(path: "devices", method: .get))
+            if let remoteDevice = remoteDevices.data.first(where: { $0.hardwareId.caseInsensitiveCompare(hardwareID) == .orderedSame }) {
+                let existing = try? await localStore.fetchAll().first(where: {
+                    $0.id.uuidString.caseInsensitiveCompare(remoteDevice.id) == .orderedSame
+                })
+                let summary = makeSummary(from: remoteDevice, existing: existing, peripheralOverride: peripheralID)
+                try await localStore.upsert(summary)
+                return summary
+            }
+
+            try await Task.sleep(for: .seconds(1))
+        }
+
+        throw BLEDeviceProvisioningError.pairingFailed(
+            String(localized: "The device joined Bluetooth, but backend registration was not confirmed in time.")
+        )
+    }
+
+    private func provisioningFailureMessage(for peripheralID: UUID, wifiSSID: String) -> String? {
+        guard let deviceInfo = latestDeviceInfoByPeripheralID[peripheralID] else {
+            return nil
+        }
+
+        let provisioningState = deviceInfo.provisioningState?.lowercased()
+        let lastError = deviceInfo.lastError?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+        guard provisioningState == "failed" || lastError.contains("reason=201") else {
+            return nil
+        }
+
+        if lastError.contains("reason=201") {
+            return "DoseLatch could not find the Wi-Fi network \"\(wifiSSID)\". Make sure it is visible to 2.4 GHz devices and not hidden or 5 GHz-only."
+        }
+
+        if !lastError.isEmpty {
+            return "DoseLatch Wi-Fi provisioning failed: \(lastError)"
+        }
+
+        return "DoseLatch Wi-Fi provisioning failed before backend registration completed."
+    }
+
+    private func publishPairingStatus(for peripheralID: UUID, payload: BLEDeviceInfoPayload) {
+        let provisioningState = payload.provisioningState?.lowercased()
+        let wifiState = payload.wifiState?.lowercased()
+        let lastError = payload.lastError?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+        let message: String?
+        if provisioningState == "failed" {
+            message = lastError.isEmpty ? "DoseLatch provisioning failed." : "DoseLatch provisioning failed: \(lastError)"
+        } else if wifiState == "connected" {
+            message = payload.paired
+                ? "DoseLatch is paired."
+                : "DoseLatch connected to Wi-Fi. Registering device..."
+        } else if provisioningState == "provisioning" || wifiState == "connecting" {
+            message = "DoseLatch is connecting to Wi-Fi..."
+        } else if !lastError.isEmpty {
+            message = "DoseLatch status: \(lastError)"
+        } else {
+            message = nil
+        }
+
+        guard let message else {
+            return
+        }
+
+        publishPairingStatus(for: peripheralID, message: message)
+    }
+
+    private func publishPairingStatus(for peripheralID: UUID, message: String) {
+        NotificationCenter.default.post(
+            name: .devicePairingStatusDidChange,
+            object: self,
+            userInfo: [
+                DevicePairingStatusUserInfoKey.peripheralID: peripheralID,
+                DevicePairingStatusUserInfoKey.message: message,
+            ]
+        )
+    }
+
+    private func makeSummary(
+        from remoteDevice: FamilyDevice,
+        existing: DeviceSummary?,
+        peripheralOverride: UUID? = nil
+    ) -> DeviceSummary {
+        let identifier = peripheralOverride
+            ?? existing?.peripheralIdentifier
+            ?? UUID(uuidString: remoteDevice.id)
+            ?? UUID()
+        let connectionState: DeviceConnectionState
+        if existing?.connectionState == .connected || remoteDevice.lastSeenAt != nil {
+            connectionState = .connected
+        } else {
+            connectionState = existing?.connectionState ?? .paired
+        }
+
+        return DeviceSummary(
+            id: UUID(uuidString: remoteDevice.id) ?? UUID(),
+            peripheralIdentifier: identifier,
+            firmwareVersion: remoteDevice.firmwareVersion ?? existing?.firmwareVersion ?? "Unknown",
+            name: remoteDevice.name,
+            status: DeviceStatus(rawValue: remoteDevice.status) ?? .active,
+            connectionState: connectionState,
+            lastSeenAt: remoteDevice.lastSeenAt ?? existing?.lastSeenAt,
+            lastEventType: existing?.lastEventType
+        )
     }
 
     private func updateDeviceEvent(peripheralID: UUID, payload: BLEDeviceEventPayload) async throws {
@@ -222,18 +391,31 @@ public final class DeviceRepository: DeviceRepositoryProtocol {
     }
 
     private var backendMode: String {
-        #if DEBUG
-            "mock"
-        #else
-            "http"
-        #endif
+        "http"
     }
 
     private var backendBaseURL: String? {
-        #if DEBUG
-            nil
-        #else
-            "https://yourdomain.com"
-        #endif
+        "https://resourceful-generosity-staging.up.railway.app"
+    }
+
+    private func decodePairingTokenFamilyID(_ token: String) -> String? {
+        let segments = token.split(separator: ".")
+        guard segments.count >= 2 else {
+            return nil
+        }
+
+        var payload = String(segments[1])
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        let paddingLength = (4 - payload.count % 4) % 4
+        payload.append(String(repeating: "=", count: paddingLength))
+
+        guard let data = Data(base64Encoded: payload),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let familyID = object["familyId"] as? String else {
+            return nil
+        }
+
+        return familyID
     }
 }

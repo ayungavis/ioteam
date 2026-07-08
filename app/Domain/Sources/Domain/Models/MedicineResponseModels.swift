@@ -1,34 +1,5 @@
 import Foundation
 
-// MARK: - Device registration
-
-public struct DeviceRegistrationResponse: Codable, Sendable, Equatable {
-    public let success: Bool
-    public let data: RegisteredDevice
-    public init(success: Bool, data: RegisteredDevice) { self.success = success; self.data = data }
-}
-
-public struct RegisteredDevice: Codable, Sendable, Equatable {
-    public let id: String; public let name: String; public let hardwareId: String; public let familyId: String
-    public init(id: String, name: String, hardwareId: String, familyId: String) { self.id = id; self.name = name; self.hardwareId = hardwareId; self.familyId = familyId }
-}
-
-// MARK: - Family device list
-
-public struct FamilyDevice: Codable, Sendable, Equatable, Identifiable {
-    public let id: String; public let familyId: String; public let name: String; public let status: String
-    public let firmwareVersion: String?; public let lastSeenAt: Date?
-    public init(id: String, familyId: String, name: String, status: String, firmwareVersion: String? = nil, lastSeenAt: Date? = nil) {
-        self.id = id; self.familyId = familyId; self.name = name; self.status = status
-        self.firmwareVersion = firmwareVersion; self.lastSeenAt = lastSeenAt
-    }
-}
-
-public struct FamilyDeviceListResponse: Codable, Sendable, Equatable {
-    public let success: Bool; public let data: [FamilyDevice]
-    public init(success: Bool, data: [FamilyDevice]) { self.success = success; self.data = data }
-}
-
 // MARK: - Medicine list
 
 public struct MedicineItem: Codable, Sendable, Equatable, Identifiable {

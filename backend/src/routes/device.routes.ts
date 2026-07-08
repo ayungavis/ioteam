@@ -7,17 +7,15 @@ import {
   deleteDevice,
   ingestDeviceEvent,
 } from "../controllers/device.controller";
-import { authenticate } from "../middleware/auth.middleware";
+import { authenticate, authenticateDevice } from "../middleware/auth.middleware";
 
 const router = Router();
 
-router.use(authenticate);
-
-router.get("/", listDevices);
-router.post("/pairing-token", createPairingToken);
 router.post("/register", registerDevice);
-router.patch("/:id", updateDevice);
-router.delete("/:id", deleteDevice);
-router.post("/:id/events", ingestDeviceEvent);
+router.get("/", authenticate, listDevices);
+router.post("/pairing-token", authenticate, createPairingToken);
+router.patch("/:id", authenticate, updateDevice);
+router.delete("/:id", authenticate, deleteDevice);
+router.post("/:id/events", authenticateDevice, ingestDeviceEvent);
 
 export default router;

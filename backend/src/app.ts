@@ -26,12 +26,12 @@ app.get("/health", (_req, res) => {
 app.use("/docs", swaggerUi.serve, swaggerUi.setup(swaggerDocument));
 
 app.use("/auth", authRoutes);
-app.use("/", userRoutes);
 app.use("/families", familyRoutes);
 app.use("/devices", deviceRoutes);
 app.use("/medicines", medicineRoutes);
 app.use("/doses", doseRoutes);
 app.use("/notifications", notificationRoutes);
+app.use("/", userRoutes);
 
 app.use(errorHandler);
 

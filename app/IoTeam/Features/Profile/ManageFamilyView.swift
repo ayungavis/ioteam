@@ -6,7 +6,6 @@ struct ManageFamilyView: View {
     @Environment(\.getCurrentFamilyUseCase) private var getCurrentFamily
     @Environment(\.createFamilyUseCase) private var createFamily
     @Environment(\.joinFamilyUseCase) private var joinFamily
-    @Environment(\.registerDeviceUseCase) private var registerDevice
     @Environment(\.refreshInviteCodeUseCase) private var refreshCode
     @Environment(\.removeMemberUseCase) private var removeMember
     @Environment(\.renameFamilyUseCase) private var renameFamily
@@ -15,7 +14,6 @@ struct ManageFamilyView: View {
         getCurrentFamily: GetCurrentFamilyUseCase(client: FamilyPreviewAPI()),
         createFamily: CreateFamilyUseCase(client: FamilyPreviewAPI()),
         joinFamily: JoinFamilyUseCase(client: FamilyPreviewAPI()),
-        registerDevice: RegisterDeviceUseCase(client: FamilyPreviewAPI()),
         refreshInviteCode: RefreshInviteCodeUseCase(client: FamilyPreviewAPI()),
         removeMember: RemoveMemberUseCase(client: FamilyPreviewAPI()),
         renameFamily: RenameFamilyUseCase(client: FamilyPreviewAPI()),
@@ -40,7 +38,6 @@ struct ManageFamilyView: View {
                 getCurrentFamily: getCurrentFamily,
                 createFamily: createFamily,
                 joinFamily: joinFamily,
-                registerDevice: registerDevice,
                 refreshInviteCode: refreshCode,
                 removeMember: removeMember,
                 renameFamily: renameFamily,

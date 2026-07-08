@@ -1,3 +1,4 @@
+import Data
 import Domain
 import SwiftUI
 
@@ -12,6 +13,7 @@ final class AddDeviceViewModel {
     var isDetectingWiFi = false
     var scanState: BLEScanState = .idle
     var isPairing = false
+    var pairingStatusMessage: String?
     var alertMessage: String?
 
     var selectedDeviceName: String? {
@@ -27,6 +29,8 @@ final class AddDeviceViewModel {
     private var scanTask: Task<Void, Never>?
     @ObservationIgnored
     private var wiFiTask: Task<Void, Never>?
+    @ObservationIgnored
+    private var pairingStatusObserver: NSObjectProtocol?
 
     init(
         startDeviceScanUseCase: StartDeviceScanUseCase,
@@ -38,9 +42,27 @@ final class AddDeviceViewModel {
         self.stopDeviceScanUseCase = stopDeviceScanUseCase
         self.pairDeviceUseCase = pairDeviceUseCase
         self.wiFiProvisioningService = wiFiProvisioningService
+        self.pairingStatusObserver = NotificationCenter.default.addObserver(
+            forName: .devicePairingStatusDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self,
+                  let peripheralID = notification.userInfo?[DevicePairingStatusUserInfoKey.peripheralID] as? UUID,
+                  peripheralID == self.selectedDeviceID,
+                  let message = notification.userInfo?[DevicePairingStatusUserInfoKey.message] as? String
+            else {
+                return
+            }
+
+            self.pairingStatusMessage = message
+        }
     }
 
     deinit {
+        if let pairingStatusObserver {
+            NotificationCenter.default.removeObserver(pairingStatusObserver)
+        }
         stopScanning()
     }
 
@@ -50,6 +72,7 @@ final class AddDeviceViewModel {
         visibleDevices = []
         scanState = .scanning
         currentWiFiSSID = nil
+        pairingStatusMessage = nil
         scanTask?.cancel()
         loadCurrentWiFi()
 
@@ -104,6 +127,7 @@ final class AddDeviceViewModel {
         if customName.isEmpty {
             customName = device.name
         }
+        pairingStatusMessage = nil
         stopScanning()
     }
 
@@ -115,6 +139,7 @@ final class AddDeviceViewModel {
 
         isPairing = true
         alertMessage = nil
+        pairingStatusMessage = "Preparing Wi-Fi for DoseLatch..."
 
         defer {
             isPairing = false
@@ -125,8 +150,9 @@ final class AddDeviceViewModel {
                 ssid: wifiSSID.trimmingCharacters(in: .whitespacesAndNewlines),
                 passphrase: wifiPassword
             )
+            pairingStatusMessage = "Sending provisioning to DoseLatch..."
 
-            _ = try await pairDeviceUseCase.execute(
+            let pairedDevice = try await pairDeviceUseCase.execute(
                 discoveryID: selectedDeviceID,
                 provisioningInfo: DeviceProvisioningInfo(
                     customName: customName.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -134,8 +160,17 @@ final class AddDeviceViewModel {
                     wifiPassword: wifiPassword
                 )
             )
+            if let familyId = AppSessionStore.shared.familyId {
+                AppSessionStore.shared.saveFamilyAndDevice(
+                    familyId: familyId,
+                    deviceId: pairedDevice.id.uuidString,
+                    deviceName: customName.trimmingCharacters(in: .whitespacesAndNewlines)
+                )
+            }
+            pairingStatusMessage = "DoseLatch is ready."
             return true
         } catch {
+            pairingStatusMessage = nil
             alertMessage = error.localizedDescription
             return false
         }

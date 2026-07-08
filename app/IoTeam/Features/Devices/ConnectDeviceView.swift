@@ -56,6 +56,10 @@ struct ConnectDeviceView: View {
                         case .namingDevice:
                             NamingDevicePhase(
                                 deviceName: $viewModel.customName,
+                                wifiSSID: $viewModel.wifiSSID,
+                                wifiPassword: $viewModel.wifiPassword,
+                                currentWiFiSSID: viewModel.currentWiFiSSID,
+                                isDetectingWiFi: viewModel.isDetectingWiFi,
                                 isPairing: viewModel.isPairing,
                                 canAdd: canAdd,
                                 onAdd: { Task { await runPairing() } }
@@ -64,13 +68,15 @@ struct ConnectDeviceView: View {
                         case .connecting:
                             ConnectionStatusPhase(
                                 title: viewModel.selectedDeviceName ?? "DoseLatch",
-                                isConnected: false
+                                isConnected: false,
+                                statusMessage: viewModel.pairingStatusMessage
                             )
 
                         case .connected:
                             ConnectionStatusPhase(
                                 title: viewModel.customName.isEmpty ? "DoseLatch" : viewModel.customName,
-                                isConnected: true
+                                isConnected: true,
+                                statusMessage: viewModel.pairingStatusMessage
                             )
                         }
                     }
@@ -125,6 +131,7 @@ struct ConnectDeviceView: View {
 
     private var canAdd: Bool {
         !viewModel.customName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !viewModel.wifiSSID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !viewModel.isPairing
     }
 
@@ -226,6 +233,10 @@ struct SelectDevicePhase: View {
 /// Step 2: Naming the Device
 struct NamingDevicePhase: View {
     @Binding var deviceName: String
+    @Binding var wifiSSID: String
+    @Binding var wifiPassword: String
+    let currentWiFiSSID: String?
+    let isDetectingWiFi: Bool
     let isPairing: Bool
     let canAdd: Bool
     let onAdd: () -> Void
@@ -260,6 +271,51 @@ struct NamingDevicePhase: View {
                             .stroke(Color.brandBorder, lineWidth: 1)
                     )
 
+                VStack(alignment: .leading, spacing: 8) {
+                    TextField("Home Wi-Fi", text: $wifiSSID)
+                        .font(.system(size: 16))
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 14)
+                        .background(Color.brandCard)
+                        .cornerRadius(8)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color.brandBorder, lineWidth: 1)
+                        )
+
+                    SecureField("Wi-Fi Password", text: $wifiPassword)
+                        .font(.system(size: 16))
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 14)
+                        .background(Color.brandCard)
+                        .cornerRadius(8)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color.brandBorder, lineWidth: 1)
+                        )
+
+                    if isDetectingWiFi {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                            Text("Detecting current Wi-Fi...")
+                                .font(.system(size: 13))
+                                .foregroundStyle(Color.brandTextSecondary)
+                        }
+                    } else if let currentWiFiSSID {
+                        Text("Detected Wi-Fi: \(currentWiFiSSID)")
+                            .font(.system(size: 13))
+                            .foregroundStyle(Color.brandTextSecondary)
+                    } else {
+                        Text("Current Wi-Fi is unavailable on this device.")
+                            .font(.system(size: 13))
+                            .foregroundStyle(Color.brandTextSecondary)
+                    }
+                }
+
                 Button(action: onAdd) {
                     HStack(spacing: 8) {
                         if isPairing {
@@ -290,6 +346,7 @@ struct NamingDevicePhase: View {
 struct ConnectionStatusPhase: View {
     let title: String
     let isConnected: Bool
+    let statusMessage: String?
 
     var body: some View {
         HStack(spacing: 16) {
@@ -315,16 +372,25 @@ struct ConnectionStatusPhase: View {
                     .background(Color.brandSuccess)
                     .cornerRadius(8)
                 } else {
-                    HStack(spacing: 8) {
-                        ProgressView().tint(.white)
-                        Text("Connecting")
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(spacing: 8) {
+                            ProgressView().tint(.white)
+                            Text("Connecting")
+                        }
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(Color.brandAccent)
+                        .cornerRadius(8)
+
+                        if let statusMessage, !statusMessage.isEmpty {
+                            Text(statusMessage)
+                                .font(.system(size: 13))
+                                .foregroundColor(.brandTextSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .background(Color.brandAccent)
-                    .cornerRadius(8)
                 }
             }
             .padding(.trailing, 16)

@@ -74,6 +74,18 @@ final class AppSessionStore {
         UserDefaults.standard.set(deviceName, forKey: deviceNameKey)
     }
 
+    func saveFamily(_ familyId: String) {
+        self.familyId = familyId
+        UserDefaults.standard.set(familyId, forKey: familyIdKey)
+    }
+
+    func clearDeviceSelection() {
+        deviceId = nil
+        deviceName = nil
+        UserDefaults.standard.removeObject(forKey: deviceIdKey)
+        UserDefaults.standard.removeObject(forKey: deviceNameKey)
+    }
+
     func clearFamilyAndDevice() {
         familyId = nil; deviceId = nil; deviceName = nil
         UserDefaults.standard.removeObject(forKey: familyIdKey)

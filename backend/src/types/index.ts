@@ -3,6 +3,7 @@ import { Request } from "express";
 // Alias for route handlers that require authentication.
 // userId is guaranteed present after the authenticate middleware runs.
 export type AuthenticatedRequest = Request;
+export type AuthenticatedDeviceRequest = Request & { deviceId: string };
 
 export interface ApiResponse<T = unknown> {
   success: boolean;

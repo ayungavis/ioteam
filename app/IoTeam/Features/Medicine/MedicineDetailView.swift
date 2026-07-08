@@ -8,7 +8,6 @@ struct MedicineDetailView: View {
     @Environment(\.createMedicineUseCase) private var createMedicineUseCase
     @Environment(\.getMedicineDosesUseCase) private var getMedicineDosesUseCase
     @Environment(\.listFamilyDevicesUseCase) private var listFamilyDevicesUseCase
-    @Environment(\.registerDeviceUseCase) private var registerDeviceUseCase
     @Environment(\.getMedicineDetailUseCase) private var getMedicineDetailUseCase
     @Environment(\.updateMedicineUseCase) private var updateMedicineUseCase
     @Environment(\.deleteMedicineUseCase) private var deleteMedicineUseCase
@@ -63,15 +62,12 @@ struct MedicineDetailView: View {
                     createMedicine: createMedicineUseCase,
                     getDoses: getMedicineDosesUseCase,
                     listFamilyDevices: listFamilyDevicesUseCase,
-                    registerDevice: registerDeviceUseCase,
                     getDetail: getMedicineDetailUseCase,
                     update: updateMedicineUseCase,
                     delete: deleteMedicineUseCase,
                     reschedulePreview: reschedulePreviewUseCase,
-                    reschedule: rescheduleMedicineUseCase,
-                    markDoseTaken: markDoseTakenUseCase
-                ),
-                appSessionStore: AppSessionStore.shared
+                    reschedule: rescheduleMedicineUseCase
+                )
             )
         }
         .onChange(of: viewModel.alertMessage) { _, newValue in
@@ -136,7 +132,7 @@ private struct AddMedicineForm: View {
 
             // Linked Device
             FormField(label: "Linked Device") {
-                DevicePickerField(viewModel: viewModel)
+                LinkedDevicePicker(viewModel: viewModel)
             }
 
             // Quantity
@@ -154,6 +150,49 @@ private struct AddMedicineForm: View {
         }
         .padding(.horizontal, 24)
         .padding(.bottom, 40)
+    }
+}
+
+private struct LinkedDevicePicker: View {
+    @Bindable var viewModel: MedicineDetailViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if viewModel.isLoadingDevices {
+                HStack {
+                    ProgressView()
+                    Text("Loading devices...")
+                        .font(.system(size: 15))
+                        .foregroundColor(.brandTextSecondary)
+                    Spacer()
+                }
+                .formFieldStyle()
+            } else {
+                Picker(
+                    "Select device",
+                    selection: Binding<String?>(
+                        get: { viewModel.selectedDeviceId },
+                        set: { viewModel.selectDevice(id: $0) }
+                    )
+                ) {
+                    Text("Select device").tag(nil as String?)
+                    ForEach(viewModel.availableDevices) { device in
+                        Text(device.name).tag(Optional(device.id))
+                    }
+                }
+                .pickerStyle(.menu)
+                .tint(Color.brandTextPrimary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .formFieldStyle()
+                .disabled(viewModel.availableDevices.isEmpty)
+            }
+
+            if !viewModel.isLoadingDevices && viewModel.availableDevices.isEmpty {
+                Text("No active device available. Add and pair a DoseLatch device first.")
+                    .font(.system(size: 12))
+                    .foregroundColor(.brandTextTertiary)
+            }
+        }
     }
 }
 
