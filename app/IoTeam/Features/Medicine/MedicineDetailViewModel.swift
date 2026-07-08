@@ -31,6 +31,8 @@ final class MedicineDetailViewModel {
     var mode: Mode
     var medicineName = ""
     var selectedDeviceName = ""
+    var selectedDeviceId: String?
+    var availableDevices: [FamilyDevice] = []
     var quantity = 1
     var frequency: MedicineFrequency = .daily
     var dailyTimes: [Date] = [Calendar.current.date(from: DateComponents(hour: 8, minute: 0))!]
@@ -48,6 +50,7 @@ final class MedicineDetailViewModel {
     var doseFilter: DoseFilter = .upcoming
     var isLoadingDoses = false
     var isGeneratingPreview = false
+    var isLoadingDevices = false
     var alertMessage: String?
 
     // Edit-mode state
@@ -61,24 +64,34 @@ final class MedicineDetailViewModel {
     private var originalStatus: MedicineStatus = .active
 
     private var useCases: MedicineDetailUseCases?
-    private var appSessionStore: AppSessionStore?
+    private var hasLoadedDevices = false
 
     init(mode: Mode) {
         self.mode = mode
     }
 
     /// Call from onAppear to inject real use cases without replacing the entire VM
-    func configure(useCases: MedicineDetailUseCases, appSessionStore: AppSessionStore) {
+    func configure(useCases: MedicineDetailUseCases) {
         let needsLoad = self.useCases == nil && mode != .add
         self.useCases = useCases
-        self.appSessionStore = appSessionStore
+        if mode == .add && !hasLoadedDevices {
+            loadAvailableDevices()
+        }
         if needsLoad, case .edit(let id) = mode {
             loadDoses(medicineId: id)
             loadDetail(medicineId: id)
         }
     }
 
-    var canSave: Bool { !medicineName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && quantity > 0 }
+    var canSave: Bool {
+        let hasName = !medicineName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        switch mode {
+        case .add:
+            return hasName && quantity > 0 && selectedDeviceId != nil
+        case .edit:
+            return hasName && quantity > 0
+        }
+    }
 
     var filteredDoses: [DoseItem] {
         switch doseFilter {
@@ -111,6 +124,36 @@ final class MedicineDetailViewModel {
                 await MainActor.run { applyDetail(detail); isLoadingDetail = false }
             } catch {
                 await MainActor.run { alertMessage = error.localizedDescription; isLoadingDetail = false }
+            }
+        }
+    }
+
+    func selectDevice(id: String?) {
+        selectedDeviceId = id
+        selectedDeviceName = availableDevices.first(where: { $0.id == id })?.name ?? ""
+    }
+
+    private func loadAvailableDevices() {
+        guard let useCase = useCases?.listFamilyDevices else { return }
+        hasLoadedDevices = true
+        isLoadingDevices = true
+        Task {
+            do {
+                let devices = try await useCase.execute().filter { $0.status == DeviceStatus.active.rawValue }
+                await MainActor.run {
+                    availableDevices = devices
+                    if selectedDeviceId == nil || !devices.contains(where: { $0.id == selectedDeviceId }) {
+                        selectDevice(id: devices.first?.id)
+                    }
+                    isLoadingDevices = false
+                }
+            } catch {
+                await MainActor.run {
+                    availableDevices = []
+                    selectDevice(id: nil)
+                    alertMessage = error.localizedDescription
+                    isLoadingDevices = false
+                }
             }
         }
     }
@@ -238,33 +281,17 @@ final class MedicineDetailViewModel {
             return false
         }
         do {
-            let deviceId = try await resolveDeviceId()
+            guard let deviceId = selectedDeviceId else {
+                throw NetworkError.badResponse(
+                    statusCode: 0,
+                    message: String(localized: "No active device is available. Add and pair a DoseLatch device first.")
+                )
+            }
             _ = try await useCase.execute(name: medicineName.trimmingCharacters(in: .whitespacesAndNewlines), deviceId: deviceId, quantity: quantity, schedule: buildScheduleInput())
             return true
         } catch {
             await MainActor.run { alertMessage = error.localizedDescription }
             return false
-        }
-    }
-
-    /// Resolves the deviceId to attach the medicine to from the current session or the family's active devices.
-    private func resolveDeviceId() async throws -> String {
-        if let deviceId = await MainActor.run(body: { appSessionStore?.deviceId }) { return deviceId }
-
-        if let device = try await useCases?.listFamilyDevices.execute().first(where: { $0.status == "active" }) {
-            await saveResolvedDevice(id: device.id, familyId: device.familyId, name: device.name)
-            return device.id
-        }
-
-        throw NetworkError.badResponse(
-            statusCode: 0,
-            message: String(localized: "No active device is available. Add and pair a DoseLatch device first.")
-        )
-    }
-
-    private func saveResolvedDevice(id: String, familyId: String, name: String) async {
-        await MainActor.run {
-            appSessionStore?.saveFamilyAndDevice(familyId: familyId, deviceId: id, deviceName: name)
         }
     }
 

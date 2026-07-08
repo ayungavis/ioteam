@@ -52,6 +52,15 @@
         }
       }
     },
+    "DoseLatch did not finish pairing in time." : {
+      "comment" : "Shown when BLE provisioning stalls before the app can continue backend polling."
+    },
+    "DoseLatch disconnected before pairing completed." : {
+      "comment" : "Shown when the BLE peripheral disconnects during device provisioning."
+    },
+    "DoseLatch provisioning failed before backend registration completed." : {
+      "comment" : "Shown when the controller reports a failed provisioning state without a detailed error."
+    },
     "DoseLatch sent data in an unexpected format." : {
       "comment" : "Shown when the firmware returns malformed provisioning or event data.",
       "localizations" : {
