@@ -19,21 +19,29 @@ export const deviceRepository = {
     return Device.findOne({ where: { hardwareId } });
   },
 
-  create(data: {
-    familyId: string;
-    name: string;
-    hardwareId: string;
-    connectionType?: DeviceConnectionType;
-    firmwareVersion?: string;
-    deviceTokenHash?: string | null;
-  }) {
-    return Device.create(data);
+  create(
+    data: {
+      familyId: string;
+      name: string;
+      hardwareId: string;
+      connectionType?: DeviceConnectionType;
+      firmwareVersion?: string;
+      deviceTokenHash?: string | null;
+    },
+    transaction?: Transaction,
+  ) {
+    return Device.create(data, { transaction });
   },
 
   async update(
     id: string,
-    data: Partial<Pick<Device, "name" | "status" | "firmwareVersion" | "lastSeenAt" | "deviceTokenHash">>,
-    transaction?: Transaction
+    data: Partial<
+      Pick<
+        Device,
+        "name" | "status" | "firmwareVersion" | "lastSeenAt" | "deviceTokenHash"
+      >
+    >,
+    transaction?: Transaction,
   ) {
     const [, rows] = await Device.update(data, {
       where: { id },
@@ -44,7 +52,10 @@ export const deviceRepository = {
   },
 
   async softDelete(id: string) {
-    const [count] = await Device.update({ status: "deleted" }, { where: { id } });
+    const [count] = await Device.update(
+      { status: "deleted" },
+      { where: { id } },
+    );
     return count > 0;
   },
 
@@ -57,7 +68,7 @@ export const deviceRepository = {
       firmwareVersion?: string | null;
       rawPayload?: object | null;
     },
-    transaction?: Transaction
+    transaction?: Transaction,
   ) {
     return DeviceEvent.create(data, { transaction });
   },
