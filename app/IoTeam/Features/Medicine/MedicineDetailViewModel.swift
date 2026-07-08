@@ -65,10 +65,6 @@ final class MedicineDetailViewModel {
     private var originalStatus: MedicineStatus = .active
     private var originalDeviceId: String?
 
-    // Device picker
-    var availableDevices: [FamilyDevice] = []
-    var selectedDeviceId: String?
-
     private var useCases: MedicineDetailUseCases?
     private var hasLoadedDevices = false
 
@@ -80,7 +76,8 @@ final class MedicineDetailViewModel {
     func configure(useCases: MedicineDetailUseCases) {
         let needsLoad = self.useCases == nil && mode != .add
         self.useCases = useCases
-        if mode == .add && !hasLoadedDevices {
+        // Both modes need the device list: add preselects one, edit offers relinking.
+        if !hasLoadedDevices {
             loadAvailableDevices()
         }
         if needsLoad, case .edit(let id) = mode {
@@ -148,7 +145,9 @@ final class MedicineDetailViewModel {
                 let devices = try await useCase.execute().filter { $0.status == DeviceStatus.active.rawValue }
                 await MainActor.run {
                     availableDevices = devices
-                    if selectedDeviceId == nil || !devices.contains(where: { $0.id == selectedDeviceId }) {
+                    // Auto-select only when adding; in edit mode the medicine's own
+                    // device (set by loadDetail) must not be overridden.
+                    if mode == .add, selectedDeviceId == nil || !devices.contains(where: { $0.id == selectedDeviceId }) {
                         selectDevice(id: devices.first?.id)
                     }
                     isLoadingDevices = false
@@ -156,7 +155,6 @@ final class MedicineDetailViewModel {
             } catch {
                 await MainActor.run {
                     availableDevices = []
-                    selectDevice(id: nil)
                     alertMessage = error.localizedDescription
                     isLoadingDevices = false
                 }
