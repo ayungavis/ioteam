@@ -33,7 +33,8 @@ struct HomeTabCoordinatorView: View {
                 HomeView(
                     viewModel: HomeViewModel(
                         observeDevicesUseCase: observeDevicesUseCase,
-                        setDeviceEnabledUseCase: setDeviceEnabledUseCase
+                        setDeviceEnabledUseCase: setDeviceEnabledUseCase,
+                        refreshDevicesUseCase: RefreshDevicesUseCase(repository: deviceRepository)
                     ),
                     doseAttentionViewModel: DoseAttentionViewModel(
                         getMedicinesUseCase: getMedicinesUseCase,
@@ -82,8 +83,11 @@ struct HomeTabCoordinatorView: View {
                     .tint(Color.brandAccent)
                     .navigationDestination(for: HomeNavigationDestination.self) { destination in
                         switch destination {
-                        case .medicineDetail(let medicineID):
-                            MedicineDetailView(mode: .edit(medicineID: medicineID))
+                        case .medicineDetail(let medicineID, let filterRaw):
+                            MedicineDetailView(
+                                mode: .edit(medicineID: medicineID),
+                                initialDoseFilter: filterRaw.flatMap { DoseFilter(rawValue: $0) }
+                            )
                         default:
                             EmptyView()
                         }

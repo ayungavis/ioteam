@@ -67,9 +67,14 @@ final class MedicineDetailViewModel {
 
     private var useCases: MedicineDetailUseCases?
     private var hasLoadedDevices = false
+    @ObservationIgnored private var autoRefreshTask: Task<Void, Never>?
 
     init(mode: Mode) {
         self.mode = mode
+    }
+
+    deinit {
+        autoRefreshTask?.cancel()
     }
 
     /// Call from onAppear to inject real use cases without replacing the entire VM
@@ -83,6 +88,69 @@ final class MedicineDetailViewModel {
         if needsLoad, case .edit(let id) = mode {
             loadDoses(medicineId: id)
             loadDetail(medicineId: id)
+        }
+        // Restarted on every appear (idempotent) — onDisappear stops it, and a
+        // needsLoad-gated start would never resume after returning to the screen.
+        if case .edit(let id) = mode {
+            startAutoRefresh(medicineId: id)
+        }
+    }
+
+    // MARK: - Refresh (pull-to-refresh + 5-minute auto-refresh)
+
+    /// Silently re-fetches everything relevant to the current mode.
+    /// Errors are swallowed on purpose: background refreshes must not spam alerts.
+    func refresh() async {
+        await refreshDevices()
+        if case .edit(let id) = mode {
+            await refreshDoses(medicineId: id)
+            await refreshDetail(medicineId: id)
+        }
+    }
+
+    /// Re-fetches on the same cadence as the backend's dose scheduler sweep,
+    /// so status changes (due/missed) appear without leaving the screen.
+    private func startAutoRefresh(medicineId: String) {
+        autoRefreshTask?.cancel()
+        autoRefreshTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(300))
+                guard !Task.isCancelled, let self else { return }
+                await self.refresh()
+            }
+        }
+    }
+
+    func stopAutoRefresh() {
+        autoRefreshTask?.cancel()
+        autoRefreshTask = nil
+    }
+
+    private func refreshDoses(medicineId: String) async {
+        guard let useCase = useCases?.getDoses else { return }
+        if let result = try? await useCase.execute(medicineId: medicineId) {
+            await MainActor.run { doses = result }
+        }
+    }
+
+    private func refreshDetail(medicineId: String) async {
+        guard let useCase = useCases?.getDetail else { return }
+        guard let detail = try? await useCase.execute(medicineId: medicineId) else { return }
+        await MainActor.run {
+            // Never clobber the user's in-progress edits with server state.
+            if !hasDetailChanges { applyDetail(detail) }
+        }
+    }
+
+    private func refreshDevices() async {
+        guard let useCase = useCases?.listFamilyDevices else { return }
+        guard let devices = try? await useCase.execute() else { return }
+        let active = devices.filter { $0.status == DeviceStatus.active.rawValue }
+        await MainActor.run {
+            availableDevices = active
+            if mode == .add, selectedDeviceId == nil || !active.contains(where: { $0.id == selectedDeviceId }) {
+                selectDevice(id: active.first?.id)
+            }
         }
     }
 

@@ -125,6 +125,7 @@ struct ManageFamilyView: View {
             }
         }
         .listStyle(.insetGrouped).scrollContentBackground(.hidden)
+        .refreshable { await vm.loadFamily() }
     }
 
     // MARK: - No Family

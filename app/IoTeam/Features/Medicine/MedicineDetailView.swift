@@ -20,8 +20,10 @@ struct MedicineDetailView: View {
     @State private var historyDose: DoseItem?
     @State private var showErrorAlert = false
 
-    init(mode: MedicineDetailViewModel.Mode) {
-        _viewModel = State(initialValue: MedicineDetailViewModel(mode: mode))
+    init(mode: MedicineDetailViewModel.Mode, initialDoseFilter: DoseFilter? = nil) {
+        let model = MedicineDetailViewModel(mode: mode)
+        if let initialDoseFilter { model.doseFilter = initialDoseFilter }
+        _viewModel = State(initialValue: model)
     }
 
     var body: some View {
@@ -71,6 +73,8 @@ struct MedicineDetailView: View {
                 )
             )
         }
+        .refreshable { await viewModel.refresh() }
+        .onDisappear { viewModel.stopAutoRefresh() }
         .onChange(of: viewModel.alertMessage) { _, newValue in
             showErrorAlert = newValue != nil
         }
@@ -97,6 +101,7 @@ struct MedicineDetailView: View {
     private func scheduleUIDose(from item: DoseItem) -> ScheduleUIDose {
         ScheduleUIDose(
             id: item.id,
+            medicineId: item.medicineId,
             scheduledAt: item.scheduledAt,
             windowStartAt: item.windowStartAt,
             windowEndAt: item.windowEndAt,

@@ -38,7 +38,7 @@ struct MedicineListView: View {
                         } else {
                             VStack(spacing: 16) {
                                 ForEach(viewModel.medicines) { item in
-                                    Button { tabRouter.navigate(to: .medicineDetail(medicineID: item.id), in: .medicine) } label: { MedicineCard(item: item) }
+                                    Button { tabRouter.navigate(to: .medicineDetail(medicineID: item.id, doseFilter: nil), in: .medicine) } label: { MedicineCard(item: item) }
                                         .buttonStyle(.plain)
                                 }
                             }
@@ -47,6 +47,7 @@ struct MedicineListView: View {
                 }
             }
         }
+        .refreshable { await viewModel.loadMedicines() }
         .onAppear { viewModel = MedicineListViewModel(getMedicinesUseCase: getMedicinesUseCase); Task { await viewModel.loadMedicines() } }
         .onChange(of: isAddPresented) { _, newValue in
             if !newValue { Task { await viewModel.loadMedicines() } }
