@@ -79,54 +79,51 @@ export const deviceService = {
     let device: Device | undefined = undefined;
     let deviceToken: string | undefined = undefined;
 
-    const t = await sequelize.transaction();
+    return sequelize.transaction(async (tx) => {
+      const existing = await deviceRepository.findByHardwareId(data.hardwareId);
+      if (existing) {
+        deviceToken = await tokenService.generateDeviceToken(existing.id);
+        device = await deviceRepository.update(
+          existing.id,
+          {
+            name: data.name,
+            deviceTokenHash: tokenService.hash(deviceToken),
+          },
+          tx,
+        );
+      } else {
+        device = await deviceRepository.create(
+          {
+            familyId: pairing.familyId,
+            name: data.name,
+            hardwareId: data.hardwareId,
+            firmwareVersion: data.firmwareVersion,
+            connectionType: data.connectionType ?? "bluetooth",
+          },
+          tx,
+        );
 
-    const existing = await deviceRepository.findByHardwareId(data.hardwareId);
-    if (existing) {
-      deviceToken = await tokenService.generateDeviceToken(existing.id);
-      device = await deviceRepository.update(
-        existing.id,
-        {
-          name: data.name,
-          deviceTokenHash: tokenService.hash(deviceToken),
-        },
-        t,
-      );
-    } else {
-      device = await deviceRepository.create(
-        {
-          familyId: pairing.familyId,
-          name: data.name,
-          hardwareId: data.hardwareId,
-          firmwareVersion: data.firmwareVersion,
-          connectionType: data.connectionType ?? "bluetooth",
-        },
-        t,
-      );
+        deviceToken = await tokenService.generateDeviceToken(device.id);
+        device = await deviceRepository.update(
+          device.id,
+          {
+            deviceTokenHash: tokenService.hash(deviceToken),
+          },
+          tx,
+        );
+      }
 
-      deviceToken = await tokenService.generateDeviceToken(device.id);
-      device = await deviceRepository.update(
-        device.id,
-        {
-          deviceTokenHash: tokenService.hash(deviceToken),
-        },
-        t,
-      );
-    }
+      if (!deviceToken) {
+        throw new BadRequestError(
+          "Device token is failed to generate, please try again",
+        );
+      }
 
-    if (!deviceToken) {
-      await t.rollback();
-      throw new BadRequestError(
-        "Device token is failed to generate, please try again",
-      );
-    }
-
-    await t.commit();
-
-    return {
-      device: device,
-      deviceToken,
-    };
+      return {
+        device: device,
+        deviceToken,
+      };
+    });
   },
 
   async updateDevice(
