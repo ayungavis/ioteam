@@ -6,6 +6,8 @@ import SwiftUI
 // MARK: - Main View
 struct HomeView: View {
     @Environment(HomeTabRouter.self) private var tabRouter
+    @Environment(AppNotificationManager.self) private var notificationManager
+    @Environment(\.scenePhase) private var scenePhase
     @State private var viewModel: HomeViewModel
     private let doseAttentionViewModel: DoseAttentionViewModel?
     private let scheduleViewModel: ScheduleViewModel?
@@ -50,6 +52,11 @@ struct HomeView: View {
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
+                        // MARK: - Doses needing action (due / needs confirmation)
+                        if let doseAttentionViewModel, !doseAttentionViewModel.attentionDoses.isEmpty {
+                            DoseAttentionSection(viewModel: doseAttentionViewModel)
+                        }
+
                         Text("Devices")
                             .font(.system(size: 18, weight: .regular))
                             .foregroundColor(.brandTextPrimary)
@@ -100,6 +107,11 @@ struct HomeView: View {
                     .padding(.top, 12)
                     .padding(.bottom, 100)
                 }
+                .refreshable {
+                    await viewModel.refreshDevices()
+                    await doseAttentionViewModel?.load()
+                    await scheduleViewModel?.loadDoses()
+                }
             }
         }
         .sheet(isPresented: $isAddDevicePresented) {
@@ -120,6 +132,19 @@ struct HomeView: View {
         .task {
             viewModel.startObserving()
             await doseAttentionViewModel?.load()
+        }
+        // Keep the attention cards honest while Home stays open: refresh when the app
+        // returns to the foreground and when a push notification lands.
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            Task {
+                await doseAttentionViewModel?.load()
+                await scheduleViewModel?.loadDoses()
+            }
+        }
+        .onChange(of: notificationManager.pendingRoute) { _, route in
+            guard route != nil else { return }
+            Task { await doseAttentionViewModel?.load() }
         }
     }
 }
@@ -220,6 +245,7 @@ private enum PreviewSamples {
         }
     )
     .environment(HomeTabRouter.shared)
+    .environment(AppNotificationManager.shared)
 }
 
 #Preview("Devices + dose alerts") {
@@ -246,6 +272,7 @@ private enum PreviewSamples {
         }
     )
     .environment(HomeTabRouter.shared)
+    .environment(AppNotificationManager.shared)
 }
 
 /// Serves canned medicine/dose data so the "Needs attention" cards render in the canvas.
@@ -299,6 +326,7 @@ private final class HomePreviewAPI: APIClientProtocol {
         }
     )
     .environment(HomeTabRouter.shared)
+    .environment(AppNotificationManager.shared)
 }
 
 private struct PreviewDeviceRepository: DeviceRepositoryProtocol {

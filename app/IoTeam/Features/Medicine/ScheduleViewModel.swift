@@ -40,6 +40,7 @@ final class ScheduleViewModel {
                 for item in doseItems where item.scheduledAt >= startDate && item.scheduledAt <= endDate {
                     allDoses.append(ScheduleUIDose(
                         id: item.id,
+                        medicineId: item.medicineId,
                         scheduledAt: item.scheduledAt,
                         windowStartAt: item.windowStartAt,
                         windowEndAt: item.windowEndAt,
