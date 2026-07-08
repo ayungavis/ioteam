@@ -12,6 +12,7 @@ struct MedicineDetailUseCases {
     let delete: DeleteMedicineUseCase
     let reschedulePreview: ReschedulePreviewUseCase
     let reschedule: RescheduleMedicineUseCase
+    let markDoseTaken: MarkDoseTakenUseCase
 }
 
 @Observable
@@ -62,6 +63,7 @@ final class MedicineDetailViewModel {
     var isSaving = false
     private var originalName = ""
     private var originalStatus: MedicineStatus = .active
+    private var originalDeviceId: String?
 
     private var useCases: MedicineDetailUseCases?
     private var hasLoadedDevices = false
@@ -74,7 +76,8 @@ final class MedicineDetailViewModel {
     func configure(useCases: MedicineDetailUseCases) {
         let needsLoad = self.useCases == nil && mode != .add
         self.useCases = useCases
-        if mode == .add && !hasLoadedDevices {
+        // Both modes need the device list: add preselects one, edit offers relinking.
+        if !hasLoadedDevices {
             loadAvailableDevices()
         }
         if needsLoad, case .edit(let id) = mode {
@@ -142,7 +145,9 @@ final class MedicineDetailViewModel {
                 let devices = try await useCase.execute().filter { $0.status == DeviceStatus.active.rawValue }
                 await MainActor.run {
                     availableDevices = devices
-                    if selectedDeviceId == nil || !devices.contains(where: { $0.id == selectedDeviceId }) {
+                    // Auto-select only when adding; in edit mode the medicine's own
+                    // device (set by loadDetail) must not be overridden.
+                    if mode == .add, selectedDeviceId == nil || !devices.contains(where: { $0.id == selectedDeviceId }) {
                         selectDevice(id: devices.first?.id)
                     }
                     isLoadingDevices = false
@@ -150,7 +155,6 @@ final class MedicineDetailViewModel {
             } catch {
                 await MainActor.run {
                     availableDevices = []
-                    selectDevice(id: nil)
                     alertMessage = error.localizedDescription
                     isLoadingDevices = false
                 }
@@ -166,6 +170,8 @@ final class MedicineDetailViewModel {
         remainingQuantity = detail.remainingQuantity
         totalQuantity = detail.totalQuantity
         selectedDeviceName = detail.device?.name ?? ""
+        selectedDeviceId = detail.device?.id
+        originalDeviceId = detail.device?.id
         adjustQuantityDelta = 0
 
         guard let schedule = detail.schedule else { return }
@@ -185,11 +191,12 @@ final class MedicineDetailViewModel {
         }
     }
 
-    /// True when name, status, or stock differ from the loaded medicine.
+    /// True when name, status, device, or stock differ from the loaded medicine.
     var hasDetailChanges: Bool {
         medicineName.trimmingCharacters(in: .whitespacesAndNewlines) != originalName
             || medicineStatus != originalStatus
             || adjustQuantityDelta != 0
+            || selectedDeviceId != originalDeviceId
     }
 
     /// PATCHes only the changed fields. Returns true when there was nothing to save or the save succeeded.
@@ -199,6 +206,7 @@ final class MedicineDetailViewModel {
         let request = UpdateMedicineRequest(
             name: trimmedName != originalName && !trimmedName.isEmpty ? trimmedName : nil,
             status: medicineStatus != originalStatus ? medicineStatus.rawValue : nil,
+            deviceId: selectedDeviceId != originalDeviceId ? selectedDeviceId : nil,
             adjustQuantity: adjustQuantityDelta != 0 ? adjustQuantityDelta : nil
         )
         if request.isEmpty { return true }
@@ -214,6 +222,9 @@ final class MedicineDetailViewModel {
                 remainingQuantity = result.medicine.remainingQuantity
                 totalQuantity = result.medicine.totalQuantity
                 adjustQuantityDelta = 0
+                selectedDeviceId = result.medicine.device?.id ?? selectedDeviceId
+                selectedDeviceName = result.medicine.device?.name ?? selectedDeviceName
+                originalDeviceId = selectedDeviceId
             }
             loadDoses(medicineId: medicineId)
             return true
@@ -255,6 +266,21 @@ final class MedicineDetailViewModel {
         guard case .edit(let medicineId) = mode, let useCase = useCases?.delete else { return false }
         do {
             _ = try await useCase.execute(medicineId: medicineId)
+            return true
+        } catch {
+            await MainActor.run { alertMessage = error.localizedDescription }
+            return false
+        }
+    }
+
+    /// Marks a dose from the history list as taken (incl. taking a missed dose late),
+    /// then reloads the doses and detail so status and remaining stock stay accurate.
+    func markDoseTaken(doseId: String) async -> Bool {
+        guard case .edit(let medicineId) = mode, let useCase = useCases?.markDoseTaken else { return false }
+        do {
+            _ = try await useCase.execute(doseId: doseId)
+            loadDoses(medicineId: medicineId)
+            loadDetail(medicineId: medicineId)
             return true
         } catch {
             await MainActor.run { alertMessage = error.localizedDescription }

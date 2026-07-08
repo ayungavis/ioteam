@@ -72,7 +72,44 @@ public final class DeviceRepository: DeviceRepositoryProtocol {
             Task { @MainActor in
                 try? await self.refreshDevicesFromBackend()
                 await self.publishDevices()
+                await self.syncWithBackend()
+                await self.publishDevices()
             }
+        }
+    }
+
+    /// Pulls the family device list from GET /devices and reconciles the local store:
+    /// upserts every backend device (preserving local-only BLE details when known)
+    /// and drops local records the backend no longer has. Offline → keeps the cache.
+    private func syncWithBackend() async {
+        do {
+            let response: FamilyDeviceListResponse = try await apiClient.request(
+                APIEndpoint(path: "devices", method: .get)
+            )
+            let local = (try? await localStore.fetchAll()) ?? []
+            let remoteIds = Set(response.data.compactMap { UUID(uuidString: $0.id) })
+
+            for remote in response.data {
+                guard let uuid = UUID(uuidString: remote.id) else { continue }
+                let existing = local.first { $0.id == uuid }
+                let summary = DeviceSummary(
+                    id: uuid,
+                    peripheralIdentifier: existing?.peripheralIdentifier ?? uuid,
+                    firmwareVersion: remote.firmwareVersion ?? existing?.firmwareVersion ?? "",
+                    name: remote.name,
+                    status: DeviceStatus(rawValue: remote.status) ?? .active,
+                    connectionState: existing?.connectionState ?? .disconnected,
+                    lastSeenAt: remote.lastSeenAt ?? existing?.lastSeenAt,
+                    lastEventType: existing?.lastEventType
+                )
+                try? await localStore.upsert(summary)
+            }
+
+            for device in local where !remoteIds.contains(device.id) {
+                try? await localStore.delete(deviceID: device.id)
+            }
+        } catch {
+            // No connectivity or auth issue — the local cache stays authoritative for now.
         }
     }
 

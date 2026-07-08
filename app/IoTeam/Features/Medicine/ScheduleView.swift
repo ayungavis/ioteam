@@ -17,62 +17,109 @@ struct ScheduleUIDose: Identifiable {
 
     var graceBeforeMinutes: Int { max(0, Int(scheduledAt.timeIntervalSince(windowStartAt) / 60)) }
     var graceAfterMinutes: Int { max(0, Int(windowEndAt.timeIntervalSince(scheduledAt) / 60)) }
+
+    /// Safeguard against accidental early checks: a dose can only be marked taken
+    /// once its window has opened (due/missed/needs-confirmation are past by definition).
+    var canMarkTakenNow: Bool {
+        switch status {
+        case .due, .missed, .needsConfirmation: return true
+        case .pending: return windowStartAt <= Date()
+        default: return false
+        }
+    }
 }
 struct DayItem: Identifiable { let id = UUID(); let date: Date; let dayString: String; let dateString: String }
 
-struct ScheduleView: View {
+/// Compact schedule embedded in the Home tab, below the devices grid.
+/// The parent provides the scrolling container and horizontal padding.
+struct ScheduleSection: View {
     @Environment(AppNotificationManager.self) private var notificationManager
     @State private var selectedDate = Date()
     @State private var weekDays: [DayItem] = []
     @State private var detailDose: ScheduleUIDose?
+    @State private var earlyConfirmDose: ScheduleUIDose?
+    @State private var todayScrollTrigger = 0
     @State private var viewModel: ScheduleViewModel
 
     init(viewModel: ScheduleViewModel) {
         _viewModel = State(initialValue: viewModel)
+        // Built in init, not onAppear: mutating state during the first layout pass of a
+        // nested ScrollView triggers AttributeGraph re-entrancy (EXC_BAD_ACCESS).
+        _weekDays = State(initialValue: Self.makeWeek())
     }
 
     var body: some View {
-        ZStack {
-            Color.brandSurface.ignoresSafeArea()
-            VStack(alignment: .leading, spacing: 0) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Schedule").font(.system(size: 32, weight: .regular)).foregroundColor(.brandTextPrimary)
-                    Text(currentDateFormatted()).font(.system(size: 16)).foregroundColor(Color.brandTextSecondary)
-                }.padding(.top, 16).padding(.horizontal, 24).padding(.bottom, 24)
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Schedule").font(.system(size: 18, weight: .semibold)).foregroundColor(.brandTextPrimary)
+                    Text(selectedDateText).font(.system(size: 13)).foregroundColor(Color.brandTextSecondary)
+                }
+                Spacer()
+                if !Calendar.current.isDateInToday(selectedDate) {
+                    Button {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { selectedDate = Date() }
+                        todayScrollTrigger += 1
+                    } label: {
+                        Text("Today")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.brandAccent)
+                            .padding(.horizontal, 12).padding(.vertical, 6)
+                            .background(Color.brandAccent.opacity(0.12))
+                            .clipShape(Capsule())
+                    }
+                }
+            }
 
+            ScrollViewReader { proxy in
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 12) {
                         ForEach(weekDays) { day in
-                            DayStripCell(day: day, isSelected: Calendar.current.isDate(day.date, inSameDayAs: selectedDate))
-                                .onTapGesture { withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { selectedDate = day.date } }
+                            DayStripCell(
+                                day: day,
+                                isSelected: Calendar.current.isDate(day.date, inSameDayAs: selectedDate),
+                                isToday: Calendar.current.isDateInToday(day.date)
+                            )
+                            .id(day.id)
+                            .onTapGesture { withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { selectedDate = day.date } }
                         }
-                    }.padding(.horizontal, 24)
-                }.padding(.bottom, 24)
+                    }
+                    .padding(.vertical, 2)
+                }
+                .onAppear {
+                    // Deferred one tick: scrolling during the initial layout of a
+                    // nested ScrollView crashes AttributeGraph.
+                    Task { @MainActor in scrollToToday(proxy) }
+                }
+                .onChange(of: todayScrollTrigger) { _, _ in
+                    withAnimation { scrollToToday(proxy) }
+                }
+            }
 
-                if viewModel.isLoading {
-                    Spacer()
-                    ProgressView().frame(maxWidth: .infinity)
-                    Spacer()
+            if viewModel.isLoading {
+                ProgressView().frame(maxWidth: .infinity).padding(.vertical, 24)
+            } else {
+                let todayDoses = viewModel.dosesForDate(selectedDate)
+                if todayDoses.isEmpty {
+                    Text("No doses scheduled for this day.")
+                        .font(.system(size: 14)).foregroundColor(.brandTextSecondary)
+                        .frame(maxWidth: .infinity, alignment: .center).padding(.vertical, 24)
                 } else {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 16) {
-                            Text("Doses").font(.system(size: 18, weight: .semibold)).foregroundColor(.brandTextPrimary).padding(.bottom, 4)
-                            let todayDoses = viewModel.dosesForDate(selectedDate)
-                            if todayDoses.isEmpty {
-                                Text("No doses scheduled for this day.")
-                                    .font(.system(size: 15)).foregroundColor(.brandTextSecondary)
-                                    .frame(maxWidth: .infinity, alignment: .center).padding(.top, 20)
-                            } else {
-                                ForEach(todayDoses) { dose in
-                                    DoseTaskRow(
-                                        dose: dose,
-                                        onMarkTaken: { Task { await viewModel.markTaken(dose) } },
-                                        onShowDetail: { detailDose = dose }
-                                    )
-                                }
-                            }
+                    VStack(spacing: 12) {
+                        ForEach(todayDoses) { dose in
+                            DoseTaskRow(
+                                dose: dose,
+                                onMarkTaken: {
+                                    // Friction for early checks: not-yet-due doses confirm first.
+                                    if dose.canMarkTakenNow {
+                                        Task { await viewModel.markTaken(dose) }
+                                    } else {
+                                        earlyConfirmDose = dose
+                                    }
+                                },
+                                onShowDetail: { detailDose = dose }
+                            )
                         }
-                        .padding(.horizontal, 24).padding(.bottom, 100)
                     }
                 }
             }
@@ -84,7 +131,7 @@ struct ScheduleView: View {
             })
             .presentationDetents([.medium])
         }
-        .onAppear { generateWeek(); consumeNotificationRoute(); Task { await viewModel.loadDoses() } }
+        .onAppear { consumeNotificationRoute(); Task { await viewModel.loadDoses() } }
         .onChange(of: notificationManager.pendingRoute) { _, newRoute in
             guard newRoute != nil else { return }
             consumeNotificationRoute()
@@ -93,6 +140,24 @@ struct ScheduleView: View {
         .alert("Error", isPresented: Binding(get: { viewModel.alertMessage != nil }, set: { _ in viewModel.alertMessage = nil })) {
             Button("OK") {}
         } message: { Text(viewModel.alertMessage ?? "") }
+        .alert(
+            "Not due yet",
+            isPresented: Binding(
+                get: { earlyConfirmDose != nil },
+                set: { if !$0 { earlyConfirmDose = nil } }
+            )
+        ) {
+            Button("Cancel", role: .cancel) {}
+            Button("Mark Anyway") {
+                if let dose = earlyConfirmDose {
+                    Task { await viewModel.markTaken(dose) }
+                }
+            }
+        } message: {
+            if let dose = earlyConfirmDose {
+                Text("\(dose.medicineName) isn't scheduled until \(dose.scheduledAt.formatted(date: .abbreviated, time: .shortened)). Mark it as taken now anyway?")
+            }
+        }
         .alert(
             "Time for your medication",
             isPresented: Binding(
@@ -119,26 +184,43 @@ struct ScheduleView: View {
         }
     }
 
-    private func currentDateFormatted() -> String { let formatter = DateFormatter(); formatter.dateFormat = "EEEE, MMMM d"; return formatter.string(from: Date()) }
-    private func generateWeek() {
+    /// Header subtitle follows the selected day (locale-aware), with a "Today" prefix when applicable.
+    private var selectedDateText: String {
+        let formatted = selectedDate.formatted(.dateTime.weekday(.wide).month(.wide).day())
+        return Calendar.current.isDateInToday(selectedDate)
+            ? String(localized: "Today · \(formatted)")
+            : formatted
+    }
+
+    private func scrollToToday(_ proxy: ScrollViewProxy) {
+        if let today = weekDays.first(where: { Calendar.current.isDateInToday($0.date) }) {
+            proxy.scrollTo(today.id, anchor: .center)
+        }
+    }
+    // 7 days back through 7 days forward; the strip auto-scrolls to today.
+    private static func makeWeek() -> [DayItem] {
         let cal = Calendar.current; let today = Date(); var days: [DayItem] = []
-        for offset in 0..<7 {
+        for offset in -7...7 {
             if let date = cal.date(byAdding: .day, value: offset, to: today) {
                 let formatter = DateFormatter(); formatter.dateFormat = "EEE"; let ds = formatter.string(from: date).prefix(1).description
                 formatter.dateFormat = "d"; let dn = formatter.string(from: date)
                 days.append(DayItem(date: date, dayString: ds, dateString: dn))
             }
         }
-        weekDays = days
+        return days
     }
 }
 
 struct DayStripCell: View {
     let day: DayItem; let isSelected: Bool
+    var isToday = false
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 6) {
             Text(day.dayString).font(.system(size: 14, weight: .medium)).foregroundColor(isSelected ? .white : Color.brandTextSecondary)
             Text(day.dateString).font(.system(size: 18, weight: .bold)).foregroundColor(isSelected ? .white : .brandTextPrimary)
+            Circle()
+                .fill(isToday ? (isSelected ? Color.white : Color.brandAccent) : Color.clear)
+                .frame(width: 5, height: 5)
         }
         .frame(width: 54, height: 72).background(isSelected ? Color.brandAccent : Color.brandCard).cornerRadius(16)
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.brandBorder, lineWidth: isSelected ? 0 : 1))
@@ -150,10 +232,12 @@ struct DoseTaskRow: View {
     let onMarkTaken: () -> Void
     let onShowDetail: () -> Void
     private var isMissed: Bool { dose.status == .missed }
+    private var isNotYetDue: Bool { dose.status == .pending && !dose.canMarkTakenNow }
     private var circleColor: Color {
         switch dose.status {
         case .taken: return .brandSuccess
         case .missed: return .red
+        case .needsConfirmation: return .brandAccentStrong
         default: return .brandBorder
         }
     }
@@ -167,7 +251,11 @@ struct DoseTaskRow: View {
                     if isMissed {
                         Image(systemName: "xmark").font(.system(size: 12, weight: .bold)).foregroundColor(.red)
                     }
+                    if dose.status == .needsConfirmation {
+                        Image(systemName: "questionmark").font(.system(size: 12, weight: .bold)).foregroundColor(.brandAccentStrong)
+                    }
                 }
+                .opacity(isNotYetDue ? 0.4 : 1)
             }.buttonStyle(.plain).disabled(dose.status == .taken || isMissed)
             VStack(alignment: .leading, spacing: 4) {
                 Text(dose.time).font(.system(size: 16, weight: .semibold)).foregroundColor(dose.status == .taken ? Color.brandTextTertiary : .brandTextPrimary)
@@ -201,8 +289,16 @@ struct DoseDetailSheet: View {
     let dose: ScheduleUIDose
     let onMarkTaken: () -> Void
 
-    private var isActionable: Bool { dose.status == .pending || dose.status == .due || dose.status == .missed }
+    private var isActionable: Bool { dose.canMarkTakenNow }
     private var isLate: Bool { dose.status == .missed }
+    private var isConfirmation: Bool { dose.status == .needsConfirmation }
+    private var isNotYetDue: Bool { dose.status == .pending && !dose.canMarkTakenNow }
+
+    private var actionTitle: LocalizedStringResource {
+        if isLate { return "Take Late" }
+        if isConfirmation { return "Yes, I took it" }
+        return "Mark as Taken"
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -239,7 +335,15 @@ struct DoseDetailSheet: View {
                     Text("This dose was missed. You can still record it — the actual time you took it will be saved.")
                         .font(.system(size: 13)).foregroundColor(.brandTextSecondary)
                 }
-                PrimaryButton(isLate ? "Take Late" : "Mark as Taken", icon: .checkmark, tint: .success) { onMarkTaken() }
+                if isConfirmation {
+                    Text("The pill box was opened, but this dose wasn't confirmed.")
+                        .font(.system(size: 13)).foregroundColor(.brandTextSecondary)
+                }
+                PrimaryButton(actionTitle, icon: .checkmark, tint: .success) { onMarkTaken() }
+            } else if isNotYetDue {
+                Text("This dose isn't due until \(dose.scheduledAt.formatted(date: .abbreviated, time: .shortened)). You can still mark it if you're taking it early.")
+                    .font(.system(size: 13)).foregroundColor(.brandTextSecondary)
+                PrimaryButton("Mark as Taken Anyway", icon: .checkmark) { onMarkTaken() }
             }
 
             Spacer()

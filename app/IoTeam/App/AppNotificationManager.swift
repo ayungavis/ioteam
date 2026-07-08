@@ -17,6 +17,18 @@ struct PendingNotificationRoute: Equatable, Sendable {
     let kind: String
 }
 
+/// User-facing notification preference, stored locally per phone —
+/// the backend broadcasts identically to the whole family, so this
+/// presentation choice lives entirely on-device.
+enum NotificationPrefs {
+    /// How family alerts (missed / needs confirmation) present while the app is open on screen.
+    static let quietFamilyAlertsKey = "notif_quiet_family_alerts"
+
+    static var quietFamilyAlerts: Bool {
+        UserDefaults.standard.bool(forKey: quietFamilyAlertsKey)
+    }
+}
+
 
 @Observable
 @MainActor
@@ -99,19 +111,32 @@ final class AppNotificationManager {
         pendingRoute = route
     }
 
-    /// Switches to the Schedule tab; ScheduleView then consumes the route via
-    /// `takePendingDoseRoute()` and shows a one-tap confirmation for the dose.
+    /// Switches to the Home tab (which hosts the schedule); the schedule section then
+    /// consumes the route via `takePendingDoseRoute()` and shows a one-tap confirmation.
     func consumePendingRoute(using tabRouter: HomeTabRouter) {
         guard pendingRoute != nil else {
             return
         }
-        tabRouter.selectedTab = .schedule
-        tabRouter.schedulePath = NavigationPath()
+        tabRouter.selectedTab = .home
+        tabRouter.homePath = NavigationPath()
     }
 
     func takePendingDoseRoute() -> PendingNotificationRoute? {
         defer { pendingRoute = nil }
         return pendingRoute
+    }
+
+    // MARK: - Foreground presentation
+
+    /// How a notification presents while the app is in the foreground:
+    /// dose reminders stay prominent; family alerts (missed / confirmation) can be quiet.
+    nonisolated static func presentationOptions(forKind kind: String?) -> UNNotificationPresentationOptions {
+        switch kind {
+        case "missed", "needs_confirmation":
+            return NotificationPrefs.quietFamilyAlerts ? [.list] : [.banner, .list, .sound]
+        default:
+            return [.banner, .list, .sound]
+        }
     }
     
     private func registerCurrentTokenIfPossible() async {

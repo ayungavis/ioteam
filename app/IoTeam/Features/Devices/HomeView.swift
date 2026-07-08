@@ -8,16 +8,19 @@ struct HomeView: View {
     @Environment(HomeTabRouter.self) private var tabRouter
     @State private var viewModel: HomeViewModel
     private let doseAttentionViewModel: DoseAttentionViewModel?
+    private let scheduleViewModel: ScheduleViewModel?
     private let makeConnectDeviceView: () -> ConnectDeviceView
     @State private var isAddDevicePresented = false
 
     init(
         viewModel: HomeViewModel,
         doseAttentionViewModel: DoseAttentionViewModel? = nil,
+        scheduleViewModel: ScheduleViewModel? = nil,
         makeConnectDeviceView: @escaping () -> ConnectDeviceView
     ) {
         _viewModel = State(initialValue: viewModel)
         self.doseAttentionViewModel = doseAttentionViewModel
+        self.scheduleViewModel = scheduleViewModel
         self.makeConnectDeviceView = makeConnectDeviceView
     }
 
@@ -27,15 +30,16 @@ struct HomeView: View {
                 .ignoresSafeArea()
 
             VStack(spacing: 0) {
-                // MARK: - Top Bar (Add & Notifications)
-                HStack {
+                // MARK: - Title + Actions
+                HStack(alignment: .center) {
+                    Text("Home")
+                        .font(.system(size: 32, weight: .regular))
+                        .foregroundColor(.brandTextPrimary)
                     Spacer()
-
                     HStack(spacing: 12) {
                         CircleIconButton(iconName: "plus") {
                             isAddDevicePresented = true
                         }
-
                         CircleIconButton(iconName: "bell") {
                             print("Notifications tapped")
                         }
@@ -46,23 +50,9 @@ struct HomeView: View {
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
-                        // MARK: - Headers
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("My Home")
-                                .font(.system(size: 32, weight: .regular))
-                                .foregroundColor(.brandTextPrimary)
-
-                            Text("Devices")
-                                .font(.system(size: 18, weight: .regular))
-                                .foregroundColor(.brandTextPrimary)
-                        }
-                        .padding(.top, 12)
-
-                        // MARK: - Doses needing action (due / needs confirmation)
-                        if let doseAttentionViewModel {
-                            DoseAttentionSection(viewModel: doseAttentionViewModel)
-                        }
-
+                        Text("Devices")
+                            .font(.system(size: 18, weight: .regular))
+                            .foregroundColor(.brandTextPrimary)
                         // MARK: - Device Content
                         if viewModel.devices.isEmpty {
                             // Empty State
@@ -99,8 +89,15 @@ struct HomeView: View {
                                 }
                             }
                         }
+
+                        // MARK: - Schedule (week strip + doses for the selected day)
+                        if let scheduleViewModel {
+                            ScheduleSection(viewModel: scheduleViewModel)
+                                .padding(.top, 8)
+                        }
                     }
                     .padding(.horizontal, 24)
+                    .padding(.top, 12)
                     .padding(.bottom, 100)
                 }
             }
@@ -122,6 +119,7 @@ struct HomeView: View {
         }
         .task {
             viewModel.startObserving()
+            await doseAttentionViewModel?.load()
         }
     }
 }
@@ -221,7 +219,65 @@ private enum PreviewSamples {
             )
         }
     )
-    .environment(HomeTabRouter())
+    .environment(HomeTabRouter.shared)
+}
+
+#Preview("Devices + dose alerts") {
+    HomeView(
+        viewModel: HomeViewModel(
+            observeDevicesUseCase: ObserveDevicesUseCase(repository: PreviewDeviceRepository()),
+            setDeviceEnabledUseCase: SetDeviceEnabledUseCase(repository: PreviewDeviceRepository())
+        ),
+        doseAttentionViewModel: DoseAttentionViewModel(
+            getMedicinesUseCase: GetMedicinesUseCase(client: HomePreviewAPI()),
+            getMedicineDosesUseCase: GetMedicineDosesUseCase(client: HomePreviewAPI()),
+            markDoseTakenUseCase: MarkDoseTakenUseCase(client: HomePreviewAPI())
+        ),
+        makeConnectDeviceView: {
+            ConnectDeviceView(
+                viewModel: AddDeviceViewModel(
+                    startDeviceScanUseCase: StartDeviceScanUseCase(repository: PreviewDeviceRepository()),
+                    stopDeviceScanUseCase: StopDeviceScanUseCase(repository: PreviewDeviceRepository()),
+                    pairDeviceUseCase: PairDeviceUseCase(repository: PreviewDeviceRepository()),
+                    wiFiProvisioningService: PreviewWiFiProvisioningService()
+                ),
+                onComplete: {}
+            )
+        }
+    )
+    .environment(HomeTabRouter.shared)
+}
+
+/// Serves canned medicine/dose data so the "Needs attention" cards render in the canvas.
+private final class HomePreviewAPI: APIClientProtocol {
+    func request<T: Decodable>(_ endpoint: APIEndpoint) async throws -> T {
+        if endpoint.path == "medicines" {
+            let medicines = [
+                MedicineItem(id: "med-1", name: "Lisinopril", status: "active", totalQuantity: 30, remainingQuantity: 24, pillPerDose: 1,
+                             device: MedicineDeviceSummary(id: "d1", name: "Kitchen Pill Box", status: "active"), nextDoseAt: Date().addingTimeInterval(600)),
+                MedicineItem(id: "med-2", name: "Metformin", status: "active", totalQuantity: 60, remainingQuantity: 41, pillPerDose: 2,
+                             device: MedicineDeviceSummary(id: "d2", name: "Grandma's box", status: "active"), nextDoseAt: Date().addingTimeInterval(3600))
+            ]
+            if let response = MedicineListResponse(success: true, data: medicines) as? T { return response }
+        }
+        if endpoint.path.hasSuffix("/doses") {
+            let isFirst = endpoint.path.contains("med-1")
+            let dose = DoseItem(
+                id: isFirst ? "dose-1" : "dose-2",
+                scheduleId: "s1",
+                medicineId: isFirst ? "med-1" : "med-2",
+                scheduledAt: Date().addingTimeInterval(isFirst ? -300 : -1200),
+                windowStartAt: Date().addingTimeInterval(isFirst ? -1200 : -2100),
+                windowEndAt: Date().addingTimeInterval(isFirst ? 1500 : 600),
+                doseAmount: isFirst ? 1 : 2,
+                status: isFirst ? "due" : "needs_confirmation",
+                actualTakenAt: nil,
+                takenSource: nil
+            )
+            if let response = DoseListResponse(success: true, data: [dose]) as? T { return response }
+        }
+        throw NetworkError.invalidURL
+    }
 }
 
 #Preview("Empty state") {
@@ -242,7 +298,7 @@ private enum PreviewSamples {
             )
         }
     )
-    .environment(HomeTabRouter())
+    .environment(HomeTabRouter.shared)
 }
 
 private struct PreviewDeviceRepository: DeviceRepositoryProtocol {

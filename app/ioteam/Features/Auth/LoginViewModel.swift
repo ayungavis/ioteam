@@ -35,7 +35,8 @@ public final class LoginViewModel {
             // HTTP INTERCEPTOR HOOK: Save token to intercept future API requests
             await URLSessionAPIClient.updateSessionToken(session.accessToken)
             AppLaunchCoordinator.shared.loginSuccess(session: session)
-            await AppNotificationManager.shared.requestAuthorizationAfterLogin()
+            // Notification permission is requested after onboarding (first dashboard visit),
+            // not here — asking mid-login hurts opt-in rates.
             
             isAuthenticating = false
         } catch {

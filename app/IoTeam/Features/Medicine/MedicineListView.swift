@@ -16,14 +16,18 @@ struct MedicineListView: View {
         ZStack {
             Color.brandSurface.ignoresSafeArea()
             VStack(spacing: 0) {
-                HStack { Spacer(); CircleIconButton(iconName: "plus") { isAddPresented = true } }
-                    .padding(.horizontal, 24).padding(.top, 16)
+                // MARK: - Title + Actions
+                HStack(alignment: .center) {
+                    Text("My Medicines")
+                        .font(.system(size: 32, weight: .regular))
+                        .foregroundColor(.brandTextPrimary)
+                    Spacer()
+                    CircleIconButton(iconName: "plus") { isAddPresented = true }
+                }
+                .padding(.horizontal, 24).padding(.top, 16)
+
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("My Medicines").font(.system(size: 32, weight: .regular)).foregroundColor(.brandTextPrimary)
-                            Text("Medicines").font(.system(size: 18, weight: .regular)).foregroundColor(.brandTextPrimary)
-                        }.padding(.top, 12)
                         if viewModel.isLoading { ProgressView().frame(maxWidth: .infinity).padding(.top, 40) }
                         else if viewModel.medicines.isEmpty {
                             Button { isAddPresented = true } label: {
@@ -39,7 +43,7 @@ struct MedicineListView: View {
                                 }
                             }
                         }
-                    }.padding(.horizontal, 24).padding(.bottom, 100)
+                    }.padding(.horizontal, 24).padding(.top, 12).padding(.bottom, 100)
                 }
             }
         }
@@ -94,12 +98,11 @@ struct StatusBadge: View {
 }
 
 #Preview("With medicines") {
-    let vm = MedicineListViewModel(getMedicinesUseCase: GetMedicinesUseCase(client: PreviewAPI()))
-    vm.medicines = [MedicineItem(id: "1", name: "Paracetamol", status: "active", totalQuantity: 30, remainingQuantity: 24, pillPerDose: 1, device: MedicineDeviceSummary(id: "d1", name: "My Box", status: "active"), nextDoseAt: Date().addingTimeInterval(7200))]
-    return MedicineListView(viewModel: vm).environment(HomeTabRouter())
+    MedicineListView(viewModel: MedicineListViewModel(getMedicinesUseCase: GetMedicinesUseCase(client: PreviewAPI())))
+        .environment(HomeTabRouter.shared)
 }
 
-#Preview("Empty") { MedicineListView(viewModel: MedicineListViewModel(getMedicinesUseCase: GetMedicinesUseCase(client: PreviewAPI()))).environment(HomeTabRouter()) }
+#Preview("Empty") { MedicineListView(viewModel: MedicineListViewModel(getMedicinesUseCase: GetMedicinesUseCase(client: PreviewAPI()))).environment(HomeTabRouter.shared) }
 
 final class PreviewAPI: APIClientProtocol {
     func request<T: Decodable>(_ endpoint: APIEndpoint) async throws -> T { throw NetworkError.invalidURL }
