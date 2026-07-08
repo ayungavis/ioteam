@@ -17,8 +17,10 @@ public struct RegisteredDevice: Codable, Sendable, Equatable {
 
 public struct FamilyDevice: Codable, Sendable, Equatable, Identifiable {
     public let id: String; public let familyId: String; public let name: String; public let status: String
-    public init(id: String, familyId: String, name: String, status: String) {
+    public let firmwareVersion: String?; public let lastSeenAt: Date?
+    public init(id: String, familyId: String, name: String, status: String, firmwareVersion: String? = nil, lastSeenAt: Date? = nil) {
         self.id = id; self.familyId = familyId; self.name = name; self.status = status
+        self.firmwareVersion = firmwareVersion; self.lastSeenAt = lastSeenAt
     }
 }
 

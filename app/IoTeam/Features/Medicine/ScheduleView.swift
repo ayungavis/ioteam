@@ -19,10 +19,10 @@ struct ScheduleUIDose: Identifiable {
     var graceAfterMinutes: Int { max(0, Int(windowEndAt.timeIntervalSince(scheduledAt) / 60)) }
 
     /// Safeguard against accidental early checks: a dose can only be marked taken
-    /// once its window has opened (due/missed are past by definition).
+    /// once its window has opened (due/missed/needs-confirmation are past by definition).
     var canMarkTakenNow: Bool {
         switch status {
-        case .due, .missed: return true
+        case .due, .missed, .needsConfirmation: return true
         case .pending: return windowStartAt <= Date()
         default: return false
         }
@@ -237,6 +237,7 @@ struct DoseTaskRow: View {
         switch dose.status {
         case .taken: return .brandSuccess
         case .missed: return .red
+        case .needsConfirmation: return .brandAccentStrong
         default: return .brandBorder
         }
     }
@@ -249,6 +250,9 @@ struct DoseTaskRow: View {
                         Image(systemName: "checkmark").font(.system(size: 12, weight: .bold)).foregroundColor(.white) }
                     if isMissed {
                         Image(systemName: "xmark").font(.system(size: 12, weight: .bold)).foregroundColor(.red)
+                    }
+                    if dose.status == .needsConfirmation {
+                        Image(systemName: "questionmark").font(.system(size: 12, weight: .bold)).foregroundColor(.brandAccentStrong)
                     }
                 }
                 .opacity(isNotYetDue ? 0.4 : 1)
@@ -287,7 +291,14 @@ struct DoseDetailSheet: View {
 
     private var isActionable: Bool { dose.canMarkTakenNow }
     private var isLate: Bool { dose.status == .missed }
+    private var isConfirmation: Bool { dose.status == .needsConfirmation }
     private var isNotYetDue: Bool { dose.status == .pending && !dose.canMarkTakenNow }
+
+    private var actionTitle: LocalizedStringResource {
+        if isLate { return "Take Late" }
+        if isConfirmation { return "Yes, I took it" }
+        return "Mark as Taken"
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -324,7 +335,11 @@ struct DoseDetailSheet: View {
                     Text("This dose was missed. You can still record it — the actual time you took it will be saved.")
                         .font(.system(size: 13)).foregroundColor(.brandTextSecondary)
                 }
-                PrimaryButton(isLate ? "Take Late" : "Mark as Taken", icon: .checkmark, tint: .success) { onMarkTaken() }
+                if isConfirmation {
+                    Text("The pill box was opened, but this dose wasn't confirmed.")
+                        .font(.system(size: 13)).foregroundColor(.brandTextSecondary)
+                }
+                PrimaryButton(actionTitle, icon: .checkmark, tint: .success) { onMarkTaken() }
             } else if isNotYetDue {
                 Text("This dose isn't due until \(dose.scheduledAt.formatted(date: .abbreviated, time: .shortened)). You can still mark it if you're taking it early.")
                     .font(.system(size: 13)).foregroundColor(.brandTextSecondary)

@@ -61,6 +61,11 @@ final class MedicineDetailViewModel {
     var isSaving = false
     private var originalName = ""
     private var originalStatus: MedicineStatus = .active
+    private var originalDeviceId: String?
+
+    // Device picker
+    var availableDevices: [FamilyDevice] = []
+    var selectedDeviceId: String?
 
     private var useCases: MedicineDetailUseCases?
     private var appSessionStore: AppSessionStore?
@@ -71,12 +76,40 @@ final class MedicineDetailViewModel {
 
     /// Call from onAppear to inject real use cases without replacing the entire VM
     func configure(useCases: MedicineDetailUseCases, appSessionStore: AppSessionStore) {
-        let needsLoad = self.useCases == nil && mode != .add
+        let needsLoad = self.useCases == nil
         self.useCases = useCases
         self.appSessionStore = appSessionStore
-        if needsLoad, case .edit(let id) = mode {
-            loadDoses(medicineId: id)
-            loadDetail(medicineId: id)
+        if needsLoad {
+            loadFamilyDevices()
+            if case .edit(let id) = mode {
+                loadDoses(medicineId: id)
+                loadDetail(medicineId: id)
+            }
+        }
+    }
+
+    var selectedDeviceDisplayName: String? {
+        if let device = availableDevices.first(where: { $0.id == selectedDeviceId }) { return device.name }
+        return selectedDeviceName.isEmpty ? nil : selectedDeviceName
+    }
+
+    func selectDevice(_ device: FamilyDevice) {
+        selectedDeviceId = device.id
+        selectedDeviceName = device.name
+    }
+
+    /// Loads the family's registered devices for the picker; preselects the first
+    /// active one when adding (matching what resolveDeviceId would pick anyway).
+    func loadFamilyDevices() {
+        guard let useCase = useCases?.listFamilyDevices else { return }
+        Task {
+            guard let devices = try? await useCase.execute() else { return }
+            await MainActor.run {
+                availableDevices = devices.filter { $0.status == "active" }
+                if selectedDeviceId == nil, mode == .add, let first = availableDevices.first {
+                    selectDevice(first)
+                }
+            }
         }
     }
 
@@ -125,6 +158,8 @@ final class MedicineDetailViewModel {
         remainingQuantity = detail.remainingQuantity
         totalQuantity = detail.totalQuantity
         selectedDeviceName = detail.device?.name ?? ""
+        selectedDeviceId = detail.device?.id
+        originalDeviceId = detail.device?.id
         adjustQuantityDelta = 0
 
         guard let schedule = detail.schedule else { return }
@@ -144,11 +179,12 @@ final class MedicineDetailViewModel {
         }
     }
 
-    /// True when name, status, or stock differ from the loaded medicine.
+    /// True when name, status, device, or stock differ from the loaded medicine.
     var hasDetailChanges: Bool {
         medicineName.trimmingCharacters(in: .whitespacesAndNewlines) != originalName
             || medicineStatus != originalStatus
             || adjustQuantityDelta != 0
+            || selectedDeviceId != originalDeviceId
     }
 
     /// PATCHes only the changed fields. Returns true when there was nothing to save or the save succeeded.
@@ -158,6 +194,7 @@ final class MedicineDetailViewModel {
         let request = UpdateMedicineRequest(
             name: trimmedName != originalName && !trimmedName.isEmpty ? trimmedName : nil,
             status: medicineStatus != originalStatus ? medicineStatus.rawValue : nil,
+            deviceId: selectedDeviceId != originalDeviceId ? selectedDeviceId : nil,
             adjustQuantity: adjustQuantityDelta != 0 ? adjustQuantityDelta : nil
         )
         if request.isEmpty { return true }
@@ -173,6 +210,9 @@ final class MedicineDetailViewModel {
                 remainingQuantity = result.medicine.remainingQuantity
                 totalQuantity = result.medicine.totalQuantity
                 adjustQuantityDelta = 0
+                selectedDeviceId = result.medicine.device?.id ?? selectedDeviceId
+                selectedDeviceName = result.medicine.device?.name ?? selectedDeviceName
+                originalDeviceId = selectedDeviceId
             }
             loadDoses(medicineId: medicineId)
             return true
@@ -255,7 +295,14 @@ final class MedicineDetailViewModel {
             return false
         }
         do {
-            let deviceId = try await resolveDeviceId()
+            // The picker's explicit choice wins; the resolution chain remains the
+            // fallback for families that have no device yet.
+            let deviceId: String
+            if let selected = selectedDeviceId {
+                deviceId = selected
+            } else {
+                deviceId = try await resolveDeviceId()
+            }
             _ = try await useCase.execute(name: medicineName.trimmingCharacters(in: .whitespacesAndNewlines), deviceId: deviceId, quantity: quantity, schedule: buildScheduleInput())
             return true
         } catch {

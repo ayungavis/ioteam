@@ -136,8 +136,7 @@ private struct AddMedicineForm: View {
 
             // Linked Device
             FormField(label: "Linked Device") {
-                TextField("Select device", text: $viewModel.selectedDeviceName)
-                    .formFieldStyle()
+                DevicePickerField(viewModel: viewModel)
             }
 
             // Quantity
@@ -324,6 +323,11 @@ private struct EditMedicineDetail: View {
                         .formFieldStyle()
                 }
 
+                // Linked Device
+                FormField(label: "Linked Device") {
+                    DevicePickerField(viewModel: viewModel)
+                }
+
                 // Enabled / Disabled
                 FormField(label: "Status") {
                     Toggle(isOn: Binding(
@@ -437,6 +441,50 @@ private struct EditMedicineDetail: View {
                     .frame(maxWidth: .infinity).frame(height: 50).background(Color.brandCard).cornerRadius(12)
             }.padding(.top, 8)
         }.padding(.horizontal, 24).padding(.bottom, 40)
+    }
+}
+
+/// Menu-based picker over the family's registered devices (from GET /devices).
+/// Shows an explanatory placeholder while the family has no device yet — in that
+/// case medicine creation falls back to auto-registering one.
+private struct DevicePickerField: View {
+    @Bindable var viewModel: MedicineDetailViewModel
+
+    var body: some View {
+        if viewModel.availableDevices.isEmpty {
+            Text("No device yet — one will be set up automatically.")
+                .font(.system(size: 14))
+                .foregroundColor(.brandTextSecondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .formFieldStyle()
+        } else {
+            Menu {
+                ForEach(viewModel.availableDevices) { device in
+                    Button {
+                        viewModel.selectDevice(device)
+                    } label: {
+                        if device.id == viewModel.selectedDeviceId {
+                            Label(device.name, systemImage: "checkmark")
+                        } else {
+                            Text(device.name)
+                        }
+                    }
+                }
+            } label: {
+                HStack {
+                    if let name = viewModel.selectedDeviceDisplayName {
+                        Text(name).font(.system(size: 16)).foregroundColor(.brandTextPrimary)
+                    } else {
+                        Text("Select device").font(.system(size: 16)).foregroundColor(.brandTextTertiary)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 13))
+                        .foregroundColor(.brandTextTertiary)
+                }
+                .formFieldStyle()
+            }
+        }
     }
 }
 
