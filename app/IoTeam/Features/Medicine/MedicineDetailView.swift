@@ -64,8 +64,7 @@ struct MedicineDetailView: View {
                     delete: deleteMedicineUseCase,
                     reschedulePreview: reschedulePreviewUseCase,
                     reschedule: rescheduleMedicineUseCase
-                ),
-                appSessionStore: AppSessionStore.shared
+                )
             )
         }
         .onChange(of: viewModel.alertMessage) { _, newValue in
@@ -106,8 +105,7 @@ private struct AddMedicineForm: View {
 
             // Linked Device
             FormField(label: "Linked Device") {
-                TextField("Select device", text: $viewModel.selectedDeviceName)
-                    .formFieldStyle()
+                LinkedDevicePicker(viewModel: viewModel)
             }
 
             // Quantity
@@ -125,6 +123,49 @@ private struct AddMedicineForm: View {
         }
         .padding(.horizontal, 24)
         .padding(.bottom, 40)
+    }
+}
+
+private struct LinkedDevicePicker: View {
+    @Bindable var viewModel: MedicineDetailViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if viewModel.isLoadingDevices {
+                HStack {
+                    ProgressView()
+                    Text("Loading devices...")
+                        .font(.system(size: 15))
+                        .foregroundColor(.brandTextSecondary)
+                    Spacer()
+                }
+                .formFieldStyle()
+            } else {
+                Picker(
+                    "Select device",
+                    selection: Binding<String?>(
+                        get: { viewModel.selectedDeviceId },
+                        set: { viewModel.selectDevice(id: $0) }
+                    )
+                ) {
+                    Text("Select device").tag(nil as String?)
+                    ForEach(viewModel.availableDevices) { device in
+                        Text(device.name).tag(Optional(device.id))
+                    }
+                }
+                .pickerStyle(.menu)
+                .tint(Color.brandTextPrimary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .formFieldStyle()
+                .disabled(viewModel.availableDevices.isEmpty)
+            }
+
+            if !viewModel.isLoadingDevices && viewModel.availableDevices.isEmpty {
+                Text("No active device available. Add and pair a DoseLatch device first.")
+                    .font(.system(size: 12))
+                    .foregroundColor(.brandTextTertiary)
+            }
+        }
     }
 }
 

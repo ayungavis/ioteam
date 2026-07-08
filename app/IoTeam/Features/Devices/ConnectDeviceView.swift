@@ -68,13 +68,15 @@ struct ConnectDeviceView: View {
                         case .connecting:
                             ConnectionStatusPhase(
                                 title: viewModel.selectedDeviceName ?? "DoseLatch",
-                                isConnected: false
+                                isConnected: false,
+                                statusMessage: viewModel.pairingStatusMessage
                             )
 
                         case .connected:
                             ConnectionStatusPhase(
                                 title: viewModel.customName.isEmpty ? "DoseLatch" : viewModel.customName,
-                                isConnected: true
+                                isConnected: true,
+                                statusMessage: viewModel.pairingStatusMessage
                             )
                         }
                     }
@@ -344,6 +346,7 @@ struct NamingDevicePhase: View {
 struct ConnectionStatusPhase: View {
     let title: String
     let isConnected: Bool
+    let statusMessage: String?
 
     var body: some View {
         HStack(spacing: 16) {
@@ -369,16 +372,25 @@ struct ConnectionStatusPhase: View {
                     .background(Color.brandSuccess)
                     .cornerRadius(8)
                 } else {
-                    HStack(spacing: 8) {
-                        ProgressView().tint(.white)
-                        Text("Connecting")
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(spacing: 8) {
+                            ProgressView().tint(.white)
+                            Text("Connecting")
+                        }
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(Color.brandAccent)
+                        .cornerRadius(8)
+
+                        if let statusMessage, !statusMessage.isEmpty {
+                            Text(statusMessage)
+                                .font(.system(size: 13))
+                                .foregroundColor(.brandTextSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .background(Color.brandAccent)
-                    .cornerRadius(8)
                 }
             }
             .padding(.trailing, 16)

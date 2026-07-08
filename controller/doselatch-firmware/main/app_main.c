@@ -40,7 +40,7 @@
 #define REED_PIN GPIO_NUM_17
 
 #define DEVICE_ID_LENGTH 37
-#define TOKEN_LENGTH 96
+#define TOKEN_LENGTH 256
 #define DEVICE_NAME_LENGTH 64
 #define WIFI_SSID_LENGTH 33
 #define WIFI_PASSWORD_LENGTH 65
@@ -49,9 +49,12 @@
 #define BACKEND_DEVICE_ID_LENGTH 37
 #define DEVICE_TOKEN_LENGTH 256
 #define ERROR_LENGTH 128
-#define JSON_BUFFER_LENGTH 512
+#define JSON_BUFFER_LENGTH 1024
 #define COMMAND_BUFFER_LENGTH 160
 #define EVENT_QUEUE_LENGTH 16
+#define REED_TASK_STACK_SIZE 4096
+#define UPLOAD_TASK_STACK_SIZE 8192
+#define CONSOLE_TASK_STACK_SIZE 4096
 #define REED_DEBOUNCE_US 500000
 
 #define WIFI_CONNECTED_BIT BIT0
@@ -131,11 +134,13 @@ static EventGroupHandle_t s_wifi_events;
 static TaskHandle_t s_reed_task_handle;
 static esp_timer_handle_t s_reed_timer;
 static bool s_sntp_started = false;
+static bool s_backend_registration_blocked = false;
 
 static uint8_t s_ble_addr_type;
 static uint16_t s_ble_connection_handle = BLE_HS_CONN_HANDLE_NONE;
 static uint16_t s_device_info_handle;
 static uint16_t s_device_event_handle;
+static char s_pair_command_json_buffer[JSON_BUFFER_LENGTH];
 
 static int ble_gap_event_handler(struct ble_gap_event *event, void *arg);
 static void start_advertising(void);
@@ -183,6 +188,48 @@ static const char *provisioning_state_label(provisioning_state_t state) {
         default:
             return "unpaired";
     }
+}
+
+static void log_state_snapshot(const char *stage) {
+    char device_id[DEVICE_ID_LENGTH] = {0};
+    char device_name[DEVICE_NAME_LENGTH] = {0};
+    char wifi_ssid[WIFI_SSID_LENGTH] = {0};
+    char backend_mode[BACKEND_MODE_LENGTH] = {0};
+    char backend_base_url[BACKEND_URL_LENGTH] = {0};
+    char backend_device_id[BACKEND_DEVICE_ID_LENGTH] = {0};
+    char last_error[ERROR_LENGTH] = {0};
+    bool paired = false;
+    provisioning_state_t provisioning_state = PROVISIONING_STATE_UNPAIRED;
+    wifi_state_t wifi_state = WIFI_STATE_DISCONNECTED;
+
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    safe_copy(device_id, sizeof(device_id), s_config.device_id);
+    safe_copy(device_name, sizeof(device_name), s_config.device_name);
+    safe_copy(wifi_ssid, sizeof(wifi_ssid), s_config.wifi_ssid);
+    safe_copy(backend_mode, sizeof(backend_mode), s_config.backend_mode);
+    safe_copy(backend_base_url, sizeof(backend_base_url), s_config.backend_base_url);
+    safe_copy(backend_device_id, sizeof(backend_device_id), s_config.backend_device_id);
+    safe_copy(last_error, sizeof(last_error), s_last_error);
+    paired = s_config.paired;
+    provisioning_state = s_provisioning_state;
+    wifi_state = s_wifi_state;
+    xSemaphoreGive(s_state_mutex);
+
+    ESP_LOGI(
+        TAG,
+        "%s deviceId=%s name=%s paired=%s provisioning=%s wifi=%s ssid=%s backendMode=%s backendUrlSet=%s backendDeviceIdSet=%s lastError=%s",
+        stage,
+        device_id,
+        device_name,
+        paired ? "true" : "false",
+        provisioning_state_label(provisioning_state),
+        wifi_state_label(wifi_state),
+        wifi_ssid,
+        backend_mode,
+        backend_base_url[0] != '\0' ? "true" : "false",
+        backend_device_id[0] != '\0' ? "true" : "false",
+        last_error
+    );
 }
 
 static int64_t current_timestamp_ms(void) {
@@ -397,6 +444,11 @@ static void start_sntp_if_needed(void) {
 }
 
 static void restart_wifi_connection(void) {
+    if (s_config.wifi_ssid[0] == '\0') {
+        ESP_LOGW(TAG_WIFI, "Wi-Fi reconnect skipped: SSID is empty");
+        return;
+    }
+
     wifi_config_t wifi_config = {0};
     safe_copy((char *) wifi_config.sta.ssid, sizeof(wifi_config.sta.ssid), s_config.wifi_ssid);
     safe_copy((char *) wifi_config.sta.password, sizeof(wifi_config.sta.password), s_config.wifi_password);
@@ -409,7 +461,7 @@ static void restart_wifi_connection(void) {
     s_wifi_state = WIFI_STATE_CONNECTING;
     clear_last_error();
     ESP_ERROR_CHECK(esp_wifi_connect());
-    ESP_LOGI(TAG_WIFI, "Connecting to Wi-Fi SSID=%s", s_config.wifi_ssid);
+    ESP_LOGI(TAG_WIFI, "Wi-Fi reconnect requested ssid=%s", s_config.wifi_ssid);
 }
 
 static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data) {
@@ -421,11 +473,24 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
     }
 
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+        const wifi_event_sta_disconnected_t *disconnected = event_data;
+        char error_message[ERROR_LENGTH] = {0};
         xEventGroupClearBits(s_wifi_events, WIFI_CONNECTED_BIT);
         s_wifi_state = WIFI_STATE_DISCONNECTED;
-        set_last_error("Wi-Fi disconnected");
+        snprintf(
+            error_message,
+            sizeof(error_message),
+            "Wi-Fi disconnected (reason=%d)",
+            disconnected != NULL ? disconnected->reason : -1
+        );
+        set_last_error(error_message);
         notify_device_info();
-        ESP_LOGW(TAG_WIFI, "Wi-Fi disconnected, retrying");
+        ESP_LOGW(
+            TAG_WIFI,
+            "Wi-Fi disconnected ssid=%s reason=%d, retrying",
+            s_config.wifi_ssid,
+            disconnected != NULL ? disconnected->reason : -1
+        );
 
         if (s_config.wifi_ssid[0] != '\0') {
             esp_wifi_connect();
@@ -498,6 +563,7 @@ static void notify_ble_characteristic(uint16_t value_handle, const char *json_pa
 static void notify_device_info(void) {
     char payload[JSON_BUFFER_LENGTH] = {0};
     build_device_info_json(payload, sizeof(payload));
+    ESP_LOGD(TAG_BLE, "Notify device info payload=%s", payload);
     notify_ble_characteristic(s_device_info_handle, payload);
 }
 
@@ -542,6 +608,10 @@ static esp_err_t copy_json_string(cJSON *object, const char *key, char *destinat
         return required ? ESP_ERR_INVALID_ARG : ESP_OK;
     }
 
+    if (strlen(item->valuestring) >= destination_size) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
     safe_copy(destination, destination_size, item->valuestring);
     return ESP_OK;
 }
@@ -559,6 +629,7 @@ static esp_err_t apply_pair_command(const pair_command_t *command) {
     safe_copy(s_config.backend_mode, sizeof(s_config.backend_mode), command->backend_mode);
     safe_copy(s_config.backend_base_url, sizeof(s_config.backend_base_url), command->backend_base_url);
     s_config.paired = false;
+    s_backend_registration_blocked = false;
     s_config.backend_device_id[0] = '\0';
     s_config.device_token[0] = '\0';
     s_provisioning_state = PROVISIONING_STATE_PROVISIONING;
@@ -568,6 +639,7 @@ static esp_err_t apply_pair_command(const pair_command_t *command) {
     ESP_RETURN_ON_ERROR(storage_save_config(), TAG_STORAGE, "Failed to persist pair command");
 
     ble_svc_gap_device_name_set("DoseLatch");
+    log_state_snapshot("Pair command applied");
     restart_wifi_connection();
     notify_device_info();
     return ESP_OK;
@@ -593,19 +665,33 @@ static int pair_command_access(uint16_t conn_handle, uint16_t attr_handle, struc
         return BLE_ATT_ERR_UNLIKELY;
     }
 
-    if (context->om->om_len >= JSON_BUFFER_LENGTH) {
+    uint16_t payload_length = OS_MBUF_PKTLEN(context->om);
+    if (payload_length >= JSON_BUFFER_LENGTH) {
+        ESP_LOGW(
+            TAG_BLE,
+            "Pair command rejected: payload too large bytes=%u limit=%u",
+            payload_length,
+            JSON_BUFFER_LENGTH - 1
+        );
         return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
     }
 
-    char json_buffer[JSON_BUFFER_LENGTH] = {0};
-    int result = os_mbuf_copydata(context->om, 0, context->om->om_len, json_buffer);
+    memset(s_pair_command_json_buffer, 0, sizeof(s_pair_command_json_buffer));
+    int result = os_mbuf_copydata(context->om, 0, payload_length, s_pair_command_json_buffer);
     if (result != 0) {
+        ESP_LOGW(TAG_BLE, "Pair command copy failed rc=%d bytes=%u", result, payload_length);
         return BLE_ATT_ERR_UNLIKELY;
     }
 
-    cJSON *root = cJSON_Parse(json_buffer);
+    cJSON *root = cJSON_Parse(s_pair_command_json_buffer);
     if (root == NULL) {
-        return BLE_ATT_ERR_UNLIKELY;
+        ESP_LOGW(
+            TAG_BLE,
+            "Pair command rejected: invalid JSON bytes=%u firstSegmentBytes=%u",
+            payload_length,
+            context->om->om_len
+        );
+        return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
     }
 
     pair_command_t command = {0};
@@ -634,13 +720,25 @@ static int pair_command_access(uint16_t conn_handle, uint16_t attr_handle, struc
     if (error != ESP_OK) {
         set_last_error("Invalid provisioning payload");
         s_provisioning_state = PROVISIONING_STATE_FAILED;
+        ESP_LOGW(TAG_BLE, "Pair command rejected: invalid provisioning payload bytes=%u", payload_length);
         return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
     }
 
+    ESP_LOGI(
+        TAG_BLE,
+        "Pair command received bytes=%u deviceName=%s ssid=%s backendMode=%s backendBaseURLSet=%s passwordSet=%s",
+        payload_length,
+        command.device_name,
+        command.wifi_ssid,
+        command.backend_mode,
+        command.backend_base_url[0] != '\0' ? "true" : "false",
+        command.wifi_password[0] != '\0' ? "true" : "false"
+    );
     error = apply_pair_command(&command);
     if (error != ESP_OK) {
         set_last_error("Provisioning apply failed");
         s_provisioning_state = PROVISIONING_STATE_FAILED;
+        ESP_LOGW(TAG_BLE, "Pair command apply failed err=0x%x", error);
         return BLE_ATT_ERR_UNLIKELY;
     }
 
@@ -723,6 +821,7 @@ static int ble_gap_event_handler(struct ble_gap_event *event, void *arg) {
             if (event->connect.status == 0) {
                 s_ble_connection_handle = event->connect.conn_handle;
                 ESP_LOGI(TAG_BLE, "BLE client connected");
+                log_state_snapshot("BLE connected");
             } else {
                 ESP_LOGW(TAG_BLE, "BLE connect failed status=%d", event->connect.status);
                 start_advertising();
@@ -731,6 +830,7 @@ static int ble_gap_event_handler(struct ble_gap_event *event, void *arg) {
         case BLE_GAP_EVENT_DISCONNECT:
             s_ble_connection_handle = BLE_HS_CONN_HANDLE_NONE;
             ESP_LOGI(TAG_BLE, "BLE client disconnected");
+            log_state_snapshot("BLE disconnected");
             start_advertising();
             return 0;
         case BLE_GAP_EVENT_SUBSCRIBE:
@@ -819,12 +919,77 @@ static void reed_task(void *argument) {
     }
 }
 
-static esp_err_t http_post_json(const char *url, const char *bearer_token, const char *payload, char *response_buffer, size_t response_buffer_size) {
+typedef struct {
+    char *buffer;
+    size_t buffer_size;
+    int bytes_written;
+    bool truncated;
+} http_response_capture_t;
+
+static esp_err_t http_event_handler(esp_http_client_event_t *event) {
+    if (event->event_id != HTTP_EVENT_ON_DATA || event->user_data == NULL) {
+        return ESP_OK;
+    }
+
+    http_response_capture_t *capture = event->user_data;
+    if (capture->buffer == NULL || capture->buffer_size == 0 || event->data == NULL || event->data_len <= 0) {
+        return ESP_OK;
+    }
+
+    size_t remaining = capture->buffer_size - (size_t) capture->bytes_written - 1;
+    if (remaining == 0) {
+        capture->truncated = true;
+        return ESP_OK;
+    }
+
+    size_t copy_length = (size_t) event->data_len;
+    if (copy_length > remaining) {
+        copy_length = remaining;
+        capture->truncated = true;
+    }
+
+    memcpy(capture->buffer + capture->bytes_written, event->data, copy_length);
+    capture->bytes_written += (int) copy_length;
+    capture->buffer[capture->bytes_written] = '\0';
+    return ESP_OK;
+}
+
+static esp_err_t http_post_json(
+    const char *url,
+    const char *bearer_token,
+    const char *payload,
+    char *response_buffer,
+    size_t response_buffer_size,
+    int *status_code_out
+) {
+    if (status_code_out != NULL) {
+        *status_code_out = -1;
+    }
+
+    ESP_LOGI(
+        TAG_QUEUE,
+        "HTTP POST url=%s payloadBytes=%u bearerTokenSet=%s",
+        url,
+        (unsigned int) strlen(payload),
+        bearer_token != NULL && bearer_token[0] != '\0' ? "true" : "false"
+    );
+    http_response_capture_t response_capture = {
+        .buffer = response_buffer,
+        .buffer_size = response_buffer_size,
+        .bytes_written = 0,
+        .truncated = false,
+    };
+    if (response_buffer != NULL && response_buffer_size > 0) {
+        memset(response_buffer, 0, response_buffer_size);
+    }
+
     esp_http_client_config_t config = {
         .url = url,
         .method = HTTP_METHOD_POST,
         .timeout_ms = 15000,
         .crt_bundle_attach = esp_crt_bundle_attach,
+        .event_handler = http_event_handler,
+        .user_data = &response_capture,
     };
 
     esp_http_client_handle_t client = esp_http_client_init(&config);
@@ -843,37 +1008,46 @@ static esp_err_t http_post_json(const char *url, const char *bearer_token, const
 
     esp_err_t error = esp_http_client_perform(client);
     if (error != ESP_OK) {
+        int status_code = esp_http_client_get_status_code(client);
+        if (status_code_out != NULL) {
+            *status_code_out = status_code;
+        }
+        ESP_LOGW(TAG_QUEUE, "HTTP request failed err=0x%x status=%d url=%s", error, status_code, url);
         esp_http_client_cleanup(client);
         return error;
     }
 
     int status_code = esp_http_client_get_status_code(client);
-    int content_length = esp_http_client_get_content_length(client);
-
-    if (response_buffer != NULL && response_buffer_size > 0) {
-        memset(response_buffer, 0, response_buffer_size);
-        int total_read = 0;
-        while (total_read < (int) response_buffer_size - 1) {
-            int bytes_read = esp_http_client_read(
-                client,
-                response_buffer + total_read,
-                (int) response_buffer_size - 1 - total_read
-            );
-            if (bytes_read <= 0) {
-                break;
-            }
-            total_read += bytes_read;
-            if (content_length > 0 && total_read >= content_length) {
-                break;
-            }
-        }
-        response_buffer[total_read] = '\0';
+    if (status_code_out != NULL) {
+        *status_code_out = status_code;
     }
+    int content_length = esp_http_client_get_content_length(client);
 
     esp_http_client_cleanup(client);
     if (status_code < 200 || status_code >= 300) {
-        ESP_LOGW(TAG_QUEUE, "HTTP request failed status=%d body=%s", status_code, response_buffer != NULL ? response_buffer : "");
+        ESP_LOGW(
+            TAG_QUEUE,
+            "HTTP request failed status=%d contentLength=%d responseBytes=%d truncated=%s body=%s",
+            status_code,
+            content_length,
+            response_capture.bytes_written,
+            response_capture.truncated ? "true" : "false",
+            response_buffer != NULL ? response_buffer : ""
+        );
         return ESP_FAIL;
+    }
+
+    ESP_LOGI(
+        TAG_QUEUE,
+        "HTTP response status=%d contentLength=%d responseBytes=%d truncated=%s body=%s",
+        status_code,
+        content_length,
+        response_capture.bytes_written,
+        response_capture.truncated ? "true" : "false",
+        response_buffer != NULL ? response_buffer : ""
+    );
+    if (response_capture.truncated) {
+        return ESP_ERR_INVALID_SIZE;
     }
 
     return ESP_OK;
@@ -883,6 +1057,7 @@ static esp_err_t register_device_with_backend(void) {
     if (strcmp(s_config.backend_mode, "http") != 0 || s_config.backend_base_url[0] == '\0') {
         s_config.paired = true;
         s_provisioning_state = PROVISIONING_STATE_PROVISIONED;
+        log_state_snapshot("Backend registration skipped");
         return storage_save_config();
     }
 
@@ -899,10 +1074,21 @@ static esp_err_t register_device_with_backend(void) {
         s_config.device_id,
         s_config.device_name
     );
+    ESP_LOGI(TAG_QUEUE, "Backend register request payload=%s", payload);
 
     char response_buffer[JSON_BUFFER_LENGTH] = {0};
-    ESP_RETURN_ON_ERROR(http_post_json(url, NULL, payload, response_buffer, sizeof(response_buffer)), TAG_QUEUE, "Failed to register device");
+    int status_code = -1;
+    esp_err_t error = http_post_json(url, NULL, payload, response_buffer, sizeof(response_buffer), &status_code);
+    if (status_code == 401) {
+        set_last_error("Backend registration unauthorized; re-pair device");
+        s_provisioning_state = PROVISIONING_STATE_FAILED;
+        s_backend_registration_blocked = true;
+        ESP_LOGW(TAG_QUEUE, "Backend registration unauthorized status=%d; re-pair device", status_code);
+        return ESP_ERR_INVALID_STATE;
+    }
+    ESP_RETURN_ON_ERROR(error, TAG_QUEUE, "Failed to register device");
 
+    ESP_LOGI(TAG_QUEUE, "Backend register response payload=%s", response_buffer);
     cJSON *root = cJSON_Parse(response_buffer);
     if (root == NULL) {
         return ESP_FAIL;
@@ -910,7 +1096,7 @@ static esp_err_t register_device_with_backend(void) {
 
     cJSON *data = cJSON_GetObjectItemCaseSensitive(root, "data");
     cJSON *device = data != NULL ? cJSON_GetObjectItemCaseSensitive(data, "device") : NULL;
-    esp_err_t error = copy_json_string(device, "id", s_config.backend_device_id, sizeof(s_config.backend_device_id), true);
+    error = copy_json_string(device, "id", s_config.backend_device_id, sizeof(s_config.backend_device_id), true);
     if (error == ESP_OK && data != NULL) {
         error = copy_json_string(data, "deviceToken", s_config.device_token, sizeof(s_config.device_token), true);
     }
@@ -924,6 +1110,7 @@ static esp_err_t register_device_with_backend(void) {
     clear_last_error();
     ESP_RETURN_ON_ERROR(storage_save_config(), TAG_STORAGE, "Failed to persist device registration");
     notify_device_info();
+    log_state_snapshot("Backend registration completed");
     start_advertising();
     return ESP_OK;
 }
@@ -956,7 +1143,7 @@ static esp_err_t upload_event_to_backend(const device_event_t *event) {
     );
 
     char response_buffer[JSON_BUFFER_LENGTH] = {0};
-    return http_post_json(url, s_config.device_token, payload, response_buffer, sizeof(response_buffer));
+    return http_post_json(url, s_config.device_token, payload, response_buffer, sizeof(response_buffer), NULL);
 }
 
 static void upload_task(void *argument) {
@@ -970,9 +1157,24 @@ static void upload_task(void *argument) {
         }
 
         if (!s_config.paired || s_config.backend_device_id[0] == '\0' || s_config.device_token[0] == '\0') {
+            if (s_backend_registration_blocked) {
+                vTaskDelay(pdMS_TO_TICKS(5000));
+                continue;
+            }
+
+            ESP_LOGD(
+                TAG_QUEUE,
+                "Upload loop waiting for registration paired=%s backendDeviceIdSet=%s tokenSet=%s stackFreeWords=%u",
+                s_config.paired ? "true" : "false",
+                s_config.backend_device_id[0] != '\0' ? "true" : "false",
+                s_config.device_token[0] != '\0' ? "true" : "false",
+                (unsigned int) uxTaskGetStackHighWaterMark(NULL)
+            );
             esp_err_t registration_error = register_device_with_backend();
             if (registration_error != ESP_OK) {
-                set_last_error("Backend registration failed");
+                if (registration_error != ESP_ERR_INVALID_STATE) {
+                    set_last_error("Backend registration failed");
+                }
                 s_provisioning_state = PROVISIONING_STATE_FAILED;
                 notify_device_info();
                 ESP_LOGW(TAG_QUEUE, "Backend registration failed err=0x%x", registration_error);
@@ -1147,12 +1349,13 @@ void app_main(void) {
     }
 
     ESP_LOGI(TAG, "DoseLatch booted. deviceId=%s paired=%s", s_config.device_id, s_config.paired ? "true" : "false");
+    log_state_snapshot("Boot state");
 
-    xTaskCreate(reed_task, "reed_task", 4096, NULL, 10, &s_reed_task_handle);
+    xTaskCreate(reed_task, "reed_task", REED_TASK_STACK_SIZE, NULL, 10, &s_reed_task_handle);
     reed_init();
     wifi_init();
     ble_init();
 
-    xTaskCreate(upload_task, "upload_task", 4096, NULL, 8, NULL);
-    xTaskCreate(console_task, "console_task", 4096, NULL, 5, NULL);
+    xTaskCreate(upload_task, "upload_task", UPLOAD_TASK_STACK_SIZE, NULL, 8, NULL);
+    xTaskCreate(console_task, "console_task", CONSOLE_TASK_STACK_SIZE, NULL, 5, NULL);
 }

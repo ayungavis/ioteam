@@ -64,6 +64,24 @@ cd controller/doselatch-firmware
 idf.py -p <PORT> flash monitor
 ```
 
+While the monitor is open, type `log-level D` to enable the extra connection trace
+and `status` to print the current pairing and Wi-Fi state.
+
+## Reset Provisioning State
+
+If the controller log shows old values such as `paired=true`, `backendMode=mock`,
+or the wrong `ssid`, clear NVS before testing the Xcode add-device flow again:
+
+```text
+log-level D
+status
+factory-reset
+```
+
+After the board reboots, run `status` again. A clean provisioning run should start
+from `paired=false` and `provisioningState=unpaired`, then the next Xcode pairing
+attempt should log `Pair command received ... backendMode=http backendBaseURLSet=true`.
+
 ## What to Expect
 
 On boot, the firmware should:
