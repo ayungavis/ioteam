@@ -77,9 +77,13 @@ final class DoseAttentionViewModel {
         isWorking = false
     }
 
-    /// Hides the dose card for this app session. The dose keeps its real status on the
-    /// backend (an ignored `due` dose becomes `missed` when its window expires).
+    /// Postpones a `due` card for this app session — the dose keeps its real status on the
+    /// backend and becomes `missed` when its window expires, so nothing is lost.
+    /// `needs_confirmation` cards cannot be postponed: the backend never resolves them on
+    /// its own, so the card stays until the user confirms (a "No, I didn't" answer needs
+    /// the backend's POST /doses/{id}/confirm, currently unimplemented).
     func dismiss(_ dose: AttentionDose) {
+        guard dose.status != "needs_confirmation" else { return }
         dismissedDoseIds.insert(dose.id)
         attentionDoses.removeAll { $0.id == dose.id }
     }
@@ -89,32 +93,26 @@ final class DoseAttentionViewModel {
     }()
 }
 
+/// Renders the attention cards. Loading is triggered by the parent (HomeView) —
+/// this view is only inserted when there is something to show, so it must not
+/// own the load: a not-rendered view never fires `.task`.
 struct DoseAttentionSection: View {
-    @State private var viewModel: DoseAttentionViewModel
-
-    init(viewModel: DoseAttentionViewModel) {
-        _viewModel = State(initialValue: viewModel)
-    }
+    let viewModel: DoseAttentionViewModel
 
     var body: some View {
-        Group {
-            if !viewModel.attentionDoses.isEmpty {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Needs attention")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundColor(.brandTextPrimary)
-                    ForEach(viewModel.attentionDoses) { dose in
-                        AttentionDoseCard(
-                            dose: dose,
-                            isWorking: viewModel.isWorking,
-                            onTake: { Task { await viewModel.markTaken(dose) } },
-                            onDismiss: { withAnimation { viewModel.dismiss(dose) } }
-                        )
-                    }
-                }
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Needs attention")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundColor(.brandTextPrimary)
+            ForEach(viewModel.attentionDoses) { dose in
+                AttentionDoseCard(
+                    dose: dose,
+                    isWorking: viewModel.isWorking,
+                    onTake: { Task { await viewModel.markTaken(dose) } },
+                    onDismiss: { withAnimation { viewModel.dismiss(dose) } }
+                )
             }
         }
-        .task { await viewModel.load() }
         .alert("Error", isPresented: Binding(
             get: { viewModel.alertMessage != nil },
             set: { if !$0 { viewModel.alertMessage = nil } }
@@ -145,6 +143,11 @@ private struct AttentionDoseCard: View {
                     Text("\(dose.time) · \(dose.amount) pill\(dose.amount == 1 ? "" : "s")")
                         .font(.system(size: 13))
                         .foregroundColor(.brandTextSecondary)
+                    if isConfirmation {
+                        Text("The pill box was opened, but this dose wasn't confirmed.")
+                            .font(.system(size: 12))
+                            .foregroundColor(.brandTextSecondary)
+                    }
                 }
                 Spacer()
             }
@@ -153,7 +156,7 @@ private struct AttentionDoseCard: View {
                     HStack(spacing: 6) {
                         if isWorking { ProgressView().controlSize(.small) }
                         Image(systemName: "checkmark")
-                        Text(isConfirmation ? "Yes, taken" : "Mark as Taken")
+                        Text(isConfirmation ? "Yes, I took it" : "Mark as Taken")
                     }
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(.white)
@@ -163,16 +166,23 @@ private struct AttentionDoseCard: View {
                     .clipShape(Capsule())
                 }
                 .disabled(isWorking)
-                Button(action: onDismiss) {
-                    Text("Dismiss")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(.brandTextSecondary)
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 10)
-                        .background(Color.brandSurface)
-                        .clipShape(Capsule())
-                        .overlay(Capsule().stroke(Color.brandBorder, lineWidth: 1))
+                if !isConfirmation {
+                    Button(action: onDismiss) {
+                        Text("Later")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.brandTextSecondary)
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 10)
+                            .background(Color.brandSurface)
+                            .clipShape(Capsule())
+                            .overlay(Capsule().stroke(Color.brandBorder, lineWidth: 1))
+                    }
                 }
+            }
+            if isConfirmation {
+                Text("This stays here until you confirm.")
+                    .font(.system(size: 11))
+                    .foregroundColor(.brandTextTertiary)
             }
         }
         .padding(16)

@@ -403,11 +403,31 @@ private struct EditMedicineDetail: View {
                             }
                         }
                     }
-                    ForEach(viewModel.filteredDoses) { dose in
-                        DoseRow(dose: dose)
-                            .contentShape(Rectangle())
-                            .onTapGesture { onSelectDose(dose) }
+                    // Fixed-height box with its own scrolling so a long dose history
+                    // doesn't stretch the whole screen.
+                    Group {
+                        if viewModel.filteredDoses.isEmpty {
+                            Text("No doses here yet.")
+                                .font(.system(size: 14)).foregroundColor(.brandTextSecondary)
+                                .frame(maxWidth: .infinity, alignment: .center)
+                                .padding(.vertical, 40)
+                        } else {
+                            ScrollView {
+                                LazyVStack(spacing: 8) {
+                                    ForEach(viewModel.filteredDoses) { dose in
+                                        DoseRow(dose: dose)
+                                            .contentShape(Rectangle())
+                                            .onTapGesture { onSelectDose(dose) }
+                                    }
+                                }
+                                .padding(12)
+                            }
+                            .frame(height: 320)
+                        }
                     }
+                    .background(Color.brandSurface)
+                    .cornerRadius(16)
+                    .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.brandBorder, lineWidth: 1))
                 }
             }
 

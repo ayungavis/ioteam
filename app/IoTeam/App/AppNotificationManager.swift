@@ -111,14 +111,14 @@ final class AppNotificationManager {
         pendingRoute = route
     }
 
-    /// Switches to the Schedule tab; ScheduleView then consumes the route via
-    /// `takePendingDoseRoute()` and shows a one-tap confirmation for the dose.
+    /// Switches to the Home tab (which hosts the schedule); the schedule section then
+    /// consumes the route via `takePendingDoseRoute()` and shows a one-tap confirmation.
     func consumePendingRoute(using tabRouter: HomeTabRouter) {
         guard pendingRoute != nil else {
             return
         }
-        tabRouter.selectedTab = .schedule
-        tabRouter.schedulePath = NavigationPath()
+        tabRouter.selectedTab = .home
+        tabRouter.homePath = NavigationPath()
     }
 
     func takePendingDoseRoute() -> PendingNotificationRoute? {
