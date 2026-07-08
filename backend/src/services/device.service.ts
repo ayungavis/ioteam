@@ -1,12 +1,12 @@
-import { deviceRepository } from "../repositories/device.repository";
-import { familyRepository } from "../repositories/family.repository";
+import { Device, sequelize } from "../db";
 import {
   BadRequestError,
-  ConflictError,
   ForbiddenError,
   NotFoundError,
   UnauthorizedError,
 } from "../errors/AppError";
+import { deviceRepository } from "../repositories/device.repository";
+import { familyRepository } from "../repositories/family.repository";
 import { DeviceConnectionType, DeviceEventType } from "../types";
 import { tokenService } from "./token.service";
 
@@ -20,7 +20,9 @@ function normalizeRawPayload(raw?: string | null): object | null {
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw);
-    return parsed !== null && typeof parsed === "object" ? parsed : { value: parsed };
+    return parsed !== null && typeof parsed === "object"
+      ? parsed
+      : { value: parsed };
   } catch {
     return { raw };
   }
@@ -54,15 +56,13 @@ export const deviceService = {
     return { token, expiresInSeconds: 600 };
   },
 
-  async registerDevice(
-    data: {
-      pairingToken: string;
-      hardwareId: string;
-      name: string;
-      firmwareVersion?: string;
-      connectionType?: DeviceConnectionType;
-    },
-  ) {
+  async registerDevice(data: {
+    pairingToken: string;
+    hardwareId: string;
+    name: string;
+    firmwareVersion?: string;
+    connectionType?: DeviceConnectionType;
+  }) {
     if (!data.pairingToken) {
       throw new BadRequestError("pairingToken is required");
     }
@@ -76,29 +76,54 @@ export const deviceService = {
       throw new UnauthorizedError("Invalid or expired pairing token");
     }
 
-    const existing = await deviceRepository.findByHardwareId(data.hardwareId);
-    if (existing)
-      throw new ConflictError(
-        "A device with this hardware ID is already registered",
-      );
+    let device: Device | undefined = undefined;
+    let deviceToken: string | undefined = undefined;
 
-    const device = await deviceRepository.create({
-      familyId: pairing.familyId,
-      name: data.name,
-      hardwareId: data.hardwareId,
-      firmwareVersion: data.firmwareVersion,
-      connectionType: data.connectionType ?? "bluetooth",
+    return sequelize.transaction(async (tx) => {
+      const existing = await deviceRepository.findByHardwareId(data.hardwareId);
+      if (existing) {
+        deviceToken = await tokenService.generateDeviceToken(existing.id);
+        device = await deviceRepository.update(
+          existing.id,
+          {
+            name: data.name,
+            deviceTokenHash: tokenService.hash(deviceToken),
+          },
+          tx,
+        );
+      } else {
+        device = await deviceRepository.create(
+          {
+            familyId: pairing.familyId,
+            name: data.name,
+            hardwareId: data.hardwareId,
+            firmwareVersion: data.firmwareVersion,
+            connectionType: data.connectionType ?? "bluetooth",
+          },
+          tx,
+        );
+
+        deviceToken = await tokenService.generateDeviceToken(device.id);
+        device = await deviceRepository.update(
+          device.id,
+          {
+            deviceTokenHash: tokenService.hash(deviceToken),
+          },
+          tx,
+        );
+      }
+
+      if (!deviceToken) {
+        throw new BadRequestError(
+          "Device token is failed to generate, please try again",
+        );
+      }
+
+      return {
+        device: device,
+        deviceToken,
+      };
     });
-
-    const deviceToken = await tokenService.generateDeviceToken(device.id);
-    const updated = await deviceRepository.update(device.id, {
-      deviceTokenHash: tokenService.hash(deviceToken),
-    });
-
-    return {
-      device: updated ?? device,
-      deviceToken,
-    };
   },
 
   async updateDevice(
@@ -143,7 +168,9 @@ export const deviceService = {
     },
   ) {
     if (authenticatedDeviceId !== deviceId) {
-      throw new ForbiddenError("Device token does not match the requested device");
+      throw new ForbiddenError(
+        "Device token does not match the requested device",
+      );
     }
 
     if (data.eventType !== "open" && data.eventType !== "close") {
@@ -172,7 +199,8 @@ export const deviceService = {
     const latest = await deviceRepository.findLatestEvent(deviceId, eventType);
     if (
       latest &&
-      Math.abs(eventTime.getTime() - latest.deviceTimestamp.getTime()) < DEBOUNCE_MS
+      Math.abs(eventTime.getTime() - latest.deviceTimestamp.getTime()) <
+        DEBOUNCE_MS
     ) {
       return { status: "debounced" as const, event: null };
     }
@@ -188,7 +216,9 @@ export const deviceService = {
     });
     await deviceRepository.update(deviceId, {
       lastSeenAt: now,
-      ...(data.firmwareVersion ? { firmwareVersion: data.firmwareVersion } : {}),
+      ...(data.firmwareVersion
+        ? { firmwareVersion: data.firmwareVersion }
+        : {}),
     });
 
     return { status: "recorded" as const, event };
