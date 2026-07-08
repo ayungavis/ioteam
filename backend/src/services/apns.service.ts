@@ -1,5 +1,5 @@
-import http2 from "node:http2";
 import { SignJWT, importPKCS8 } from "jose";
+import http2 from "node:http2";
 import { NotificationPayload } from "../types";
 
 // APNS token-based auth + delivery. Reuses the existing Apple credentials
@@ -55,7 +55,7 @@ function postOne(
   session: http2.ClientHttp2Session,
   jwt: string,
   token: string,
-  body: string
+  body: string,
 ): Promise<void> {
   return new Promise((resolve) => {
     const req = session.request({
@@ -76,12 +76,17 @@ function postOne(
     req.on("data", (chunk) => (data += chunk));
     req.on("end", () => {
       if (status !== 200) {
-        console.warn(`APNS push failed (${status}) for token ${token.slice(0, 8)}…: ${data}`);
+        console.warn(
+          `APNS push failed (${status}) for token ${token.slice(0, 8)}…: ${data}`,
+        );
       }
       resolve();
     });
     req.on("error", (err) => {
-      console.warn(`APNS request error for token ${token.slice(0, 8)}…:`, err.message);
+      console.warn(
+        `APNS request error for token ${token.slice(0, 8)}…:`,
+        err.message,
+      );
       resolve();
     });
 
@@ -91,10 +96,15 @@ function postOne(
 }
 
 export const apnsService = {
-  async sendToTokens(tokens: string[], payload: NotificationPayload): Promise<void> {
+  async sendToTokens(
+    tokens: string[],
+    payload: NotificationPayload,
+  ): Promise<void> {
     if (tokens.length === 0) return;
     if (!isConfigured()) {
-      console.warn("APNS not configured (APPLE_TEAM_ID/APPLE_KEY_ID/APNS_TOPIC/APNS_KEY_P8) — skipping push");
+      console.warn(
+        "APNS not configured (APPLE_TEAM_ID/APPLE_KEY_ID/APNS_TOPIC/APNS_KEY_P8) — skipping push",
+      );
       return;
     }
 
@@ -107,7 +117,9 @@ export const apnsService = {
     }
 
     const session = http2.connect(`https://${HOST}`);
-    session.on("error", (err) => console.warn("APNS session error:", err.message));
+    session.on("error", (err) =>
+      console.warn("APNS session error:", err.message),
+    );
     try {
       const body = buildBody(payload);
       await Promise.all(tokens.map((t) => postOne(session, jwt, t, body)));

@@ -1535,6 +1535,86 @@ const swaggerDocument: OpenAPIV3.Document = {
       },
     },
 
+    "/notifications/send-test": {
+      post: {
+        tags: ["Notifications"],
+        summary: "Send a test push notification to a specific user",
+        description:
+          "Delivers an APNS push directly to the given user's registered devices." +
+          " Bypasses the dose lifecycle — purely for validating push delivery.",
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["userId"],
+                properties: {
+                  userId: {
+                    type: "string",
+                    format: "uuid",
+                    example: "550e8400-e29b-41d4-a716-446655440000",
+                  },
+                  title: {
+                    type: "string",
+                    example: "Test notification",
+                  },
+                  body: {
+                    type: "string",
+                    example: "This is a test push from IoTeam.",
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          200: {
+            description: "Push delivered",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    success: { type: "boolean", example: true },
+                    message: {
+                      type: "string",
+                      example: "Push sent to 2 device(s).",
+                    },
+                  },
+                },
+              },
+            },
+          },
+          400: {
+            description: "Missing userId",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/Error" },
+              },
+            },
+          },
+          401: {
+            description: "Unauthorized",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/Error" },
+              },
+            },
+          },
+          404: {
+            description: "No push tokens found for this user",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/Error" },
+              },
+            },
+          },
+        },
+      },
+    },
+
     // ─── Medicine ─────────────────────────────────────────────────────────────
     "/medicines": {
       get: {
@@ -2187,6 +2267,43 @@ const swaggerDocument: OpenAPIV3.Document = {
           },
           "409": {
             description: "Dose is already marked as taken",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/Error" },
+              },
+            },
+          },
+        },
+      },
+    },
+    "/scheduler/tick": {
+      post: {
+        tags: ["Scheduler"],
+        summary: "Manually trigger the dose scheduler tick",
+        description:
+          "Runs one sweep of the dose lifecycle (needs_confirmation → missed → due) " +
+          "immediately, without waiting for the cron interval. Useful for testing notifications.",
+        security: [{ bearerAuth: [] }],
+        responses: {
+          200: {
+            description: "Scheduler tick completed",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    success: { type: "boolean", example: true },
+                    message: {
+                      type: "string",
+                      example: "Dose scheduler tick completed.",
+                    },
+                  },
+                },
+              },
+            },
+          },
+          401: {
+            description: "Unauthorized",
             content: {
               "application/json": {
                 schema: { $ref: "#/components/schemas/Error" },
