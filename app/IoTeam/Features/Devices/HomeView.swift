@@ -38,13 +38,8 @@ struct HomeView: View {
                         .font(.system(size: 32, weight: .regular))
                         .foregroundColor(.brandTextPrimary)
                     Spacer()
-                    HStack(spacing: 12) {
-                        CircleIconButton(iconName: "plus") {
-                            isAddDevicePresented = true
-                        }
-                        CircleIconButton(iconName: "bell") {
-                            print("Notifications tapped")
-                        }
+                    CircleIconButton(iconName: "plus") {
+                        isAddDevicePresented = true
                     }
                 }
                 .padding(.horizontal, 24)
@@ -131,6 +126,16 @@ struct HomeView: View {
         }
         .task {
             viewModel.startObserving()
+            // Cross-refresh: confirming a dose in one section immediately updates the
+            // other (attention card confirm → schedule shows the check, and vice versa).
+            if let doseAttentionViewModel, let scheduleViewModel {
+                doseAttentionViewModel.onDoseTaken = { [weak scheduleViewModel] in
+                    await scheduleViewModel?.loadDoses()
+                }
+                scheduleViewModel.onDoseTaken = { [weak doseAttentionViewModel] in
+                    await doseAttentionViewModel?.load()
+                }
+            }
             await doseAttentionViewModel?.load()
         }
         // Keep the attention cards honest while Home stays open: refresh when the app

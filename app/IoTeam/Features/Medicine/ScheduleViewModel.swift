@@ -82,6 +82,10 @@ final class ScheduleViewModel {
 
     /// Marks the dose taken on the backend. There is no un-take endpoint, so taken doses stay taken.
     /// Early (not-yet-due) doses are allowed here — the UI adds a confirmation step first.
+    /// Called after a dose is successfully marked taken here, so sibling views
+    /// (e.g. the Home attention cards) can refresh and drop their stale card.
+    @ObservationIgnored var onDoseTaken: (() async -> Void)?
+
     func markTaken(_ dose: ScheduleUIDose) async {
         guard dose.status != .taken else { return }
         guard let idx = doses.firstIndex(where: { $0.id == dose.id }) else { return }
@@ -89,6 +93,7 @@ final class ScheduleViewModel {
         doses[idx].status = .taken
         do {
             _ = try await markDoseTakenUseCase.execute(doseId: dose.id)
+            await onDoseTaken?()
         } catch {
             doses[idx].status = previousStatus
             alertMessage = error.localizedDescription
