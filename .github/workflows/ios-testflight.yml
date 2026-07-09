@@ -110,7 +110,6 @@ jobs:
           -archivePath .build/Archives/IoTeam.xcarchive
           -derivedDataPath .build/DerivedData
           -resultBundlePath .build/IoTeamArchive.xcresult
-          -allowProvisioningUpdates
           -skipPackagePluginValidation
           CURRENT_PROJECT_VERSION="$BUILD_NUMBER"
           archive
