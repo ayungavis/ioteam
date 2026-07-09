@@ -40,6 +40,17 @@ jobs:
           p12-file-base64: ${{ secrets.APPSTORE_CERTIFICATES_FILE_BASE64 }}
           p12-password: ${{ secrets.APPSTORE_CERTIFICATES_PASSWORD }}
 
+      - name: Validate App Store Connect credentials
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          APPSTORE_ISSUER_ID: ${{ vars.APPSTORE_ISSUER_ID }}
+          APPSTORE_API_KEY_ID: ${{ vars.APPSTORE_API_KEY_ID }}
+          APPSTORE_API_PRIVATE_KEY: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
+        run: |
+          [ -n "$APPSTORE_ISSUER_ID" ] || { echo "Missing GitHub variable APPSTORE_ISSUER_ID"; exit 1; }
+          [ -n "$APPSTORE_API_KEY_ID" ] || { echo "Missing GitHub variable APPSTORE_API_KEY_ID"; exit 1; }
+          [ -n "$APPSTORE_API_PRIVATE_KEY" ] || { echo "Missing GitHub secret APPSTORE_API_PRIVATE_KEY"; exit 1; }
+
       - name: Download provisioning profiles
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: Apple-Actions/download-provisioning-profiles@v6
