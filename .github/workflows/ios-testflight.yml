@@ -22,6 +22,7 @@ jobs:
       SCHEME: IoTeam
       BUNDLE_ID: com.ayungavis.IoTeamApp
       TEAM_ID: QHL64K2LPL
+      PROVISIONING_PROFILE_NAME: IoTeamApp Apple Distribution
       BUILD_NUMBER: ${{ github.run_number }}
 
     steps:
@@ -88,9 +89,14 @@ jobs:
             <key>method</key>
             <string>app-store</string>
             <key>signingStyle</key>
-            <string>automatic</string>
+            <string>manual</string>
             <key>teamID</key>
             <string>${TEAM_ID}</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>${BUNDLE_ID}</key>
+              <string>${PROVISIONING_PROFILE_NAME}</string>
+            </dict>
             <key>stripSwiftSymbols</key>
             <true/>
             <key>uploadSymbols</key>
@@ -98,7 +104,7 @@ jobs:
           </dict>
           </plist>
           PLIST
-          perl -0pi -e 's/\$\{TEAM_ID\}/$ENV{TEAM_ID}/g' .build/ExportOptions.plist
+          perl -0pi -e 's/\$\{TEAM_ID\}/$ENV{TEAM_ID}/g; s/\$\{BUNDLE_ID\}/$ENV{BUNDLE_ID}/g; s/\$\{PROVISIONING_PROFILE_NAME\}/$ENV{PROVISIONING_PROFILE_NAME}/g' .build/ExportOptions.plist
 
       - name: Archive app
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -112,6 +118,10 @@ jobs:
           -derivedDataPath .build/DerivedData
           -resultBundlePath .build/IoTeamArchive.xcresult
           -skipPackagePluginValidation
+          CODE_SIGN_STYLE=Manual
+          CODE_SIGN_IDENTITY="Apple Distribution"
+          PROVISIONING_PROFILE_SPECIFIER="$PROVISIONING_PROFILE_NAME"
+          DEVELOPMENT_TEAM="$TEAM_ID"
           CURRENT_PROJECT_VERSION="$BUILD_NUMBER"
           archive
 
