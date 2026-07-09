@@ -59,6 +59,7 @@ jobs:
           -destination 'generic/platform=iOS Simulator'
           -derivedDataPath .build/DerivedData
           -resultBundlePath .build/IoTeamBuild.xcresult
+          -skipPackagePluginValidation
           CODE_SIGNING_ALLOWED=NO
           CURRENT_PROJECT_VERSION="$BUILD_NUMBER"
           build
@@ -98,6 +99,7 @@ jobs:
           -archivePath .build/Archives/IoTeam.xcarchive
           -derivedDataPath .build/DerivedData
           -resultBundlePath .build/IoTeamArchive.xcresult
+          -skipPackagePluginValidation
           CURRENT_PROJECT_VERSION="$BUILD_NUMBER"
           archive
 
