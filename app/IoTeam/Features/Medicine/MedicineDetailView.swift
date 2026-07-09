@@ -19,9 +19,12 @@ struct MedicineDetailView: View {
     @State private var dosePreviewViewModel: DosePreviewViewModel?
     @State private var historyDose: DoseItem?
     @State private var showErrorAlert = false
+    @State private var isEditing = false
 
-    init(mode: MedicineDetailViewModel.Mode) {
-        _viewModel = State(initialValue: MedicineDetailViewModel(mode: mode))
+    init(mode: MedicineDetailViewModel.Mode, initialDoseFilter: DoseFilter? = nil) {
+        let model = MedicineDetailViewModel(mode: mode)
+        if let initialDoseFilter { model.doseFilter = initialDoseFilter }
+        _viewModel = State(initialValue: model)
     }
 
     var body: some View {
@@ -42,6 +45,7 @@ struct MedicineDetailView: View {
                 case .edit:
                     EditMedicineDetail(
                         viewModel: viewModel,
+                        isEditing: $isEditing,
                         onSave: { Task { _ = await viewModel.saveChanges() } },
                         onReviewReschedule: {
                             Task {
@@ -71,6 +75,8 @@ struct MedicineDetailView: View {
                 )
             )
         }
+        .refreshable { await viewModel.refresh() }
+        .onDisappear { viewModel.stopAutoRefresh() }
         .onChange(of: viewModel.alertMessage) { _, newValue in
             showErrorAlert = newValue != nil
         }
@@ -91,12 +97,34 @@ struct MedicineDetailView: View {
                 Task { if await viewModel.deleteMedicine() { dismiss() } }
             }
         } message: { Text("This will remove the medicine and stop tracking. This action cannot be undone.") }
+        .toolbar {
+            if case .edit = viewModel.mode {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(isEditing ? "Done" : "Edit") {
+                        if isEditing {
+                            Task { _ = await viewModel.saveChanges() }
+                            withAnimation { isEditing = false }
+                        } else {
+                            withAnimation { isEditing = true }
+                        }
+                    }
+                    .fontWeight(.semibold)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(role: .destructive) { isDeleteAlertPresented = true } label: {
+                        Image(systemName: "trash")
+                    }
+                    .tint(.red)
+                }
+            }
+        }
     }
 
     /// Adapts a history DoseItem to the shared DoseDetailSheet model used by the Schedule tab.
     private func scheduleUIDose(from item: DoseItem) -> ScheduleUIDose {
         ScheduleUIDose(
             id: item.id,
+            medicineId: item.medicineId,
             scheduledAt: item.scheduledAt,
             windowStartAt: item.windowStartAt,
             windowEndAt: item.windowEndAt,
@@ -341,6 +369,7 @@ private struct ScheduleEditorFields: View {
 
 private struct EditMedicineDetail: View {
     @Bindable var viewModel: MedicineDetailViewModel
+    @Binding var isEditing: Bool
     let onSave: () -> Void
     let onReviewReschedule: () -> Void
     let onDelete: () -> Void
@@ -355,7 +384,7 @@ private struct EditMedicineDetail: View {
 
             if viewModel.isLoadingDetail {
                 ProgressView().frame(maxWidth: .infinity).padding(.top, 20)
-            } else {
+            } else if isEditing {
                 // Medicine Name
                 FormField(label: "Medicine Name") {
                     TextField("Enter medicine name", text: $viewModel.medicineName)
@@ -426,6 +455,52 @@ private struct EditMedicineDetail: View {
                 PrimaryButton("Review New Schedule", isValid: true, isLoading: viewModel.isGeneratingPreview, icon: .arrow) {
                     onReviewReschedule()
                 }
+            } else {
+                // MARK: - Read-only Summary
+                VStack(spacing: 0) {
+                    HStack {
+                        Text(viewModel.medicineName)
+                            .font(.system(size: 20, weight: .bold))
+                            .foregroundColor(.brandTextPrimary)
+                        Spacer()
+                        Text(viewModel.medicineStatus == .active ? "Enabled" : "Disabled")
+                            .font(.system(size: 12, weight: .semibold))
+                            .padding(.horizontal, 10).padding(.vertical, 5)
+                            .background(viewModel.medicineStatus == .active ? Color.brandSuccess : Color.brandTextSecondary)
+                            .foregroundColor(.white)
+                            .clipShape(Capsule())
+                    }
+
+                    HStack(spacing: 4) {
+                        Image(systemName: "pills").font(.system(size: 12))
+                        Text(viewModel.selectedDeviceName.isEmpty ? "—" : viewModel.selectedDeviceName)
+                            .font(.system(size: 14))
+                    }
+                    .foregroundColor(.brandTextSecondary)
+                    .padding(.top, 8)
+
+                    Divider().padding(.vertical, 12)
+
+                    HStack {
+                        Text("Stock").font(.system(size: 14)).foregroundColor(.brandTextSecondary)
+                        Spacer()
+                        Text("\(viewModel.remainingQuantity) / \(viewModel.totalQuantity)")
+                            .font(.system(size: 15, weight: .medium)).foregroundColor(.brandTextPrimary)
+                    }
+
+                    Divider().padding(.vertical, 12)
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text("Schedule").font(.system(size: 14)).foregroundColor(.brandTextSecondary)
+                            Spacer()
+                            Text(viewModel.frequency.displayName).font(.system(size: 15, weight: .medium)).foregroundColor(.brandTextPrimary)
+                        }
+                        Text(scheduleSummary)
+                            .font(.system(size: 13)).foregroundColor(.brandTextSecondary)
+                    }
+                }
+                .padding(20).background(Color.brandCard).cornerRadius(16)
             }
 
             VStack(alignment: .leading, spacing: 12) {
@@ -481,6 +556,24 @@ private struct EditMedicineDetail: View {
                     .frame(maxWidth: .infinity).frame(height: 50).background(Color.brandCard).cornerRadius(12)
             }.padding(.top, 8)
         }.padding(.horizontal, 24).padding(.bottom, 40)
+    }
+
+    private var scheduleSummary: String {
+        let grace = "grace: \(viewModel.graceBeforeMinutes)m before / \(viewModel.graceAfterMinutes)m after"
+        switch viewModel.frequency {
+        case .daily:
+            let times = viewModel.dailyTimes.map { $0.formatted(date: .omitted, time: .shortened) }.joined(separator: ", ")
+            return "\(times) (\(grace))"
+        case .weekly:
+            let dayNames = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"]
+            let days = viewModel.weeklyDays.map { $0.prefix(3) }.sorted {
+                (dayNames.firstIndex(of: String($0)) ?? 0) < (dayNames.firstIndex(of: String($1)) ?? 0)
+            }.joined(separator: ", ")
+            let times = viewModel.weeklyTimes.map { $0.formatted(date: .omitted, time: .shortened) }.joined(separator: ", ")
+            return "\(days) at \(times) (\(grace))"
+        case .hourly:
+            return "Every \(viewModel.hourlyInterval) hours (\(grace))"
+        }
     }
 }
 

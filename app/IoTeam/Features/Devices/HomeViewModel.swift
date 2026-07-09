@@ -8,15 +8,23 @@ final class HomeViewModel {
 
     private let observeDevicesUseCase: ObserveDevicesUseCase
     private let setDeviceEnabledUseCase: SetDeviceEnabledUseCase
+    private let refreshDevicesUseCase: RefreshDevicesUseCase?
     @ObservationIgnored
     private var observationTask: Task<Void, Never>?
 
     init(
         observeDevicesUseCase: ObserveDevicesUseCase,
-        setDeviceEnabledUseCase: SetDeviceEnabledUseCase
+        setDeviceEnabledUseCase: SetDeviceEnabledUseCase,
+        refreshDevicesUseCase: RefreshDevicesUseCase? = nil
     ) {
         self.observeDevicesUseCase = observeDevicesUseCase
         self.setDeviceEnabledUseCase = setDeviceEnabledUseCase
+        self.refreshDevicesUseCase = refreshDevicesUseCase
+    }
+
+    @MainActor
+    func refreshDevices() async {
+        await refreshDevicesUseCase?.execute()
     }
 
     deinit {

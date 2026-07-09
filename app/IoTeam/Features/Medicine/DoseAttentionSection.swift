@@ -66,11 +66,16 @@ final class DoseAttentionViewModel {
         }
     }
 
+    /// Called after a dose is successfully marked taken here, so sibling views
+    /// (e.g. the Home schedule list) can refresh and show the checkmark.
+    @ObservationIgnored var onDoseTaken: (() async -> Void)?
+
     func markTaken(_ dose: AttentionDose) async {
         isWorking = true
         do {
             _ = try await markDoseTakenUseCase.execute(doseId: dose.id)
             attentionDoses.removeAll { $0.id == dose.id }
+            await onDoseTaken?()
         } catch {
             alertMessage = error.localizedDescription
         }

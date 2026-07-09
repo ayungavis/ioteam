@@ -5,7 +5,7 @@ public enum AppTab: Hashable { case home, medicine, profile }
 
 public enum HomeNavigationDestination: Hashable {
     case deviceDetail(id: UUID)
-    case medicineDetail(medicineID: String)
+    case medicineDetail(medicineID: String, doseFilter: String?)
 }
 
 @Observable

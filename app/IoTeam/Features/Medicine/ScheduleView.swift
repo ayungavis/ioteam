@@ -4,6 +4,7 @@ import SwiftUI
 
 struct ScheduleUIDose: Identifiable {
     let id: String
+    let medicineId: String
     let scheduledAt: Date
     let windowStartAt: Date
     let windowEndAt: Date
@@ -135,7 +136,6 @@ struct ScheduleSection: View {
         .onChange(of: notificationManager.pendingRoute) { _, newRoute in
             guard newRoute != nil else { return }
             consumeNotificationRoute()
-            Task { await viewModel.loadDoses() }
         }
         .alert("Error", isPresented: Binding(get: { viewModel.alertMessage != nil }, set: { _ in viewModel.alertMessage = nil })) {
             Button("OK") {}
@@ -178,8 +178,36 @@ struct ScheduleSection: View {
         }
     }
 
+    /// Routes a tapped push notification to the right experience for its kind:
+    /// due → one-tap confirm dialog here; missed → the medicine's Missed history tab;
+    /// needs_confirmation → the dose sheet with "Yes, I took it".
     private func consumeNotificationRoute() {
-        if let route = notificationManager.takePendingDoseRoute() {
+        guard let route = notificationManager.takePendingDoseRoute() else { return }
+        Task { @MainActor in
+            await viewModel.loadDoses()
+            handleNotificationRoute(route)
+        }
+    }
+
+    @MainActor
+    private func handleNotificationRoute(_ route: PendingNotificationRoute) {
+        guard let dose = viewModel.doses.first(where: { $0.id == route.doseId }) else {
+            // Dose outside the ±7-day window or fetch failed — Home with the fresh
+            // schedule is still a sensible landing spot.
+            return
+        }
+        switch route.kind {
+        case "missed":
+            let router = HomeTabRouter.shared
+            router.selectedTab = .medicine
+            router.medicinePath = NavigationPath()
+            router.navigate(
+                to: .medicineDetail(medicineID: dose.medicineId, doseFilter: DoseFilter.missed.rawValue),
+                in: .medicine
+            )
+        case "needs_confirmation":
+            detailDose = dose
+        default: // "due" reminder
             viewModel.requestConfirmation(forDoseId: route.doseId)
         }
     }

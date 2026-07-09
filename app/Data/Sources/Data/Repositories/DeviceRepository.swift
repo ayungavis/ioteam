@@ -78,6 +78,11 @@ public final class DeviceRepository: DeviceRepositoryProtocol {
         }
     }
 
+    public func refreshFromBackend() async {
+        await syncWithBackend()
+        await publishDevices()
+    }
+
     /// Pulls the family device list from GET /devices and reconciles the local store:
     /// upserts every backend device (preserving local-only BLE details when known)
     /// and drops local records the backend no longer has. Offline → keeps the cache.
