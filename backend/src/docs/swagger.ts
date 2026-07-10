@@ -137,6 +137,11 @@ const swaggerDocument: OpenAPIV3.Document = {
           },
           firmwareVersion: { type: "string", example: "1.0.3", nullable: true },
           lastSeenAt: { type: "string", format: "date-time", nullable: true },
+          connectionState: {
+            type: "string",
+            enum: ["connected", "disconnected"],
+            example: "connected",
+          },
         },
       },
       ScheduleInput: {
@@ -1191,7 +1196,7 @@ const swaggerDocument: OpenAPIV3.Document = {
         tags: ["Device"],
         summary: "Register a device",
         description:
-          "Registers an ESP32 device after provisioning using the short-lived pairing token. hardwareId must be globally unique.",
+          "Registers or refreshes an ESP32 device after provisioning using the short-lived pairing token. Existing hardware may only be refreshed by the same family.",
         requestBody: {
           required: true,
           content: {
@@ -1257,8 +1262,8 @@ const swaggerDocument: OpenAPIV3.Document = {
               },
             },
           },
-          "409": {
-            description: "hardwareId already registered",
+          "403": {
+            description: "hardwareId already registered to another family",
             content: {
               "application/json": {
                 schema: { $ref: "#/components/schemas/Error" },
@@ -1368,6 +1373,69 @@ const swaggerDocument: OpenAPIV3.Document = {
           },
           "403": {
             description: "Device does not belong to your family",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/Error" },
+              },
+            },
+          },
+          "404": {
+            description: "Device not found",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/Error" },
+              },
+            },
+          },
+        },
+      },
+    },
+
+    "/devices/{id}/heartbeat": {
+      post: {
+        tags: ["Device"],
+        summary: "Refresh device liveness",
+        description:
+          "Refreshes lastSeenAt for an authenticated ESP32 without creating a reed-switch event.",
+        security: [{ deviceBearerAuth: [] }],
+        parameters: [
+          {
+            name: "id",
+            in: "path",
+            required: true,
+            schema: { type: "string", format: "uuid" },
+          },
+        ],
+        requestBody: {
+          required: false,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  firmwareVersion: { type: "string", example: "1.0.3" },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "Heartbeat recorded",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    success: { type: "boolean", example: true },
+                    data: { $ref: "#/components/schemas/Device" },
+                  },
+                },
+              },
+            },
+          },
+          "403": {
+            description: "Device token does not match the requested device",
             content: {
               "application/json": {
                 schema: { $ref: "#/components/schemas/Error" },

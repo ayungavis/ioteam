@@ -59,6 +59,7 @@ public struct FamilyDevice: Codable, Sendable, Equatable, Identifiable {
     public let status: String
     public let firmwareVersion: String?
     public let lastSeenAt: Date?
+    public let connectionState: String?
 
     public init(
         id: String,
@@ -68,7 +69,8 @@ public struct FamilyDevice: Codable, Sendable, Equatable, Identifiable {
         connectionType: String,
         status: String,
         firmwareVersion: String?,
-        lastSeenAt: Date?
+        lastSeenAt: Date?,
+        connectionState: String?
     ) {
         self.id = id
         self.familyId = familyId
@@ -78,6 +80,7 @@ public struct FamilyDevice: Codable, Sendable, Equatable, Identifiable {
         self.status = status
         self.firmwareVersion = firmwareVersion
         self.lastSeenAt = lastSeenAt
+        self.connectionState = connectionState
     }
 }
 

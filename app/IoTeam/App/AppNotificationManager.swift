@@ -29,7 +29,6 @@ enum NotificationPrefs {
     }
 }
 
-
 @Observable
 @MainActor
 final class AppNotificationManager {
@@ -37,14 +36,19 @@ final class AppNotificationManager {
     
     private(set) var authorizationStatus: UNAuthorizationStatus = .notDetermined
     private(set) var pendingRoute: PendingNotificationRoute?
-    
+
     private var currentDeviceToken: String?
     private var registerPushTokenUseCase: RegisterPushTokenUseCase?
+    private var unregisterPushTokenUseCase: UnregisterPushTokenUseCase?
 
     private init() {}
 
-    func configure(registerPushTokenUseCase: RegisterPushTokenUseCase) {
+    func configure(
+        registerPushTokenUseCase: RegisterPushTokenUseCase,
+        unregisterPushTokenUseCase: UnregisterPushTokenUseCase
+    ) {
         self.registerPushTokenUseCase = registerPushTokenUseCase
+        self.unregisterPushTokenUseCase = unregisterPushTokenUseCase
     }
     
     func syncAuthorizationStatus() async {
@@ -102,6 +106,20 @@ final class AppNotificationManager {
     
     func handleRemoteNotificationRegistrationFailure(_ error: Error) {
         print("Remote notification registration failed: \(error.localizedDescription)")
+    }
+
+    func unregisterCurrentTokenBeforeLogout() async {
+        guard let unregisterPushTokenUseCase,
+              let currentDeviceToken
+        else {
+            return
+        }
+        do {
+            try await unregisterPushTokenUseCase.execute(token: currentDeviceToken)
+            self.currentDeviceToken = nil
+        } catch {
+            print("Failed to unregister APNS token: \(error.localizedDescription)")
+        }
     }
     
     func handleNotificationTap(userInfo: [AnyHashable: Any]) {

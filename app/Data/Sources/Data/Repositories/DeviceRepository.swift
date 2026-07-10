@@ -97,16 +97,7 @@ public final class DeviceRepository: DeviceRepositoryProtocol {
             for remote in response.data {
                 guard let uuid = UUID(uuidString: remote.id) else { continue }
                 let existing = local.first { $0.id == uuid }
-                let summary = DeviceSummary(
-                    id: uuid,
-                    peripheralIdentifier: existing?.peripheralIdentifier ?? uuid,
-                    firmwareVersion: remote.firmwareVersion ?? existing?.firmwareVersion ?? "",
-                    name: remote.name,
-                    status: DeviceStatus(rawValue: remote.status) ?? .active,
-                    connectionState: existing?.connectionState ?? .disconnected,
-                    lastSeenAt: remote.lastSeenAt ?? existing?.lastSeenAt,
-                    lastEventType: existing?.lastEventType
-                )
+                let summary = makeSummary(from: remote, existing: existing)
                 try? await localStore.upsert(summary)
             }
 
@@ -154,7 +145,7 @@ public final class DeviceRepository: DeviceRepositoryProtocol {
         )
         print(
             "DoseLatch pairing started peripheral=\(discoveryID.uuidString) "
-                + "ssid=\(provisioningInfo.wifiSSID) backendMode=\(backendMode) "
+                + "backendMode=\(backendMode) "
                 + "backendBaseURLSet=\(backendBaseURL != nil)"
         )
 
@@ -164,7 +155,7 @@ public final class DeviceRepository: DeviceRepositoryProtocol {
         let pairingFamilyID = decodePairingTokenFamilyID(tokenResponse.data.token)
         print(
             "DoseLatch pairing token received peripheral=\(discoveryID.uuidString) "
-                + "familyId=\(pairingFamilyID ?? "nil") pairingToken=\(tokenResponse.data.token)"
+                + "familyId=\(pairingFamilyID ?? "nil")"
         )
 
         let info = try await bleClient.pairDevice(
@@ -192,6 +183,54 @@ public final class DeviceRepository: DeviceRepositoryProtocol {
             for: discoveryID,
             message: "DoseLatch is ready."
         )
+        await publishDevices()
+        return device
+    }
+
+    public func reconfigureDeviceWiFi(
+        deviceID: UUID,
+        discoveryID: UUID,
+        provisioningInfo: DeviceProvisioningInfo
+    ) async throws -> DeviceSummary {
+        let registeredDevice = try await findRegisteredDevice(deviceID: deviceID)
+        let deviceInfo = try await bleClient.readDeviceInfo(id: discoveryID)
+
+        guard deviceInfo.deviceId.uuidString.caseInsensitiveCompare(registeredDevice.hardwareId) == .orderedSame else {
+            throw BLEDeviceProvisioningError.pairingFailed(
+                String(localized: "The selected DoseLatch does not match this registered device.")
+            )
+        }
+
+        publishPairingStatus(
+            for: discoveryID,
+            message: "Preparing DoseLatch Wi-Fi update..."
+        )
+
+        let tokenResponse: PairingTokenResponse = try await apiClient.request(
+            APIEndpoint(path: "devices/pairing-token", method: .post)
+        )
+
+        let info = try await bleClient.pairDevice(
+            id: discoveryID,
+            pairingToken: tokenResponse.data.token,
+            wifiSSID: provisioningInfo.wifiSSID,
+            wifiPassword: provisioningInfo.wifiPassword,
+            deviceName: provisioningInfo.customName,
+            backendMode: backendMode,
+            backendBaseURL: backendBaseURL
+        )
+
+        publishPairingStatus(
+            for: discoveryID,
+            message: "DoseLatch accepted Wi-Fi update. Waiting for backend..."
+        )
+
+        let device = try await waitForRegisteredDevice(
+            hardwareID: info.deviceId.uuidString,
+            peripheralID: discoveryID,
+            wifiSSID: provisioningInfo.wifiSSID
+        )
+
         await publishDevices()
         return device
     }
@@ -284,6 +323,15 @@ public final class DeviceRepository: DeviceRepositoryProtocol {
         )
     }
 
+    private func findRegisteredDevice(deviceID: UUID) async throws -> FamilyDevice {
+        let response: FamilyDeviceListResponse = try await apiClient.request(APIEndpoint(path: "devices", method: .get))
+        guard let device = response.data.first(where: { $0.id.caseInsensitiveCompare(deviceID.uuidString) == .orderedSame }) else {
+            throw BLEDeviceProvisioningError.deviceNotFound
+        }
+
+        return device
+    }
+
     private func provisioningFailureMessage(for peripheralID: UUID, wifiSSID: String) -> String? {
         guard let deviceInfo = latestDeviceInfoByPeripheralID[peripheralID] else {
             return nil
@@ -355,7 +403,11 @@ public final class DeviceRepository: DeviceRepositoryProtocol {
             ?? UUID(uuidString: remoteDevice.id)
             ?? UUID()
         let connectionState: DeviceConnectionState
-        if existing?.connectionState == .connected || remoteDevice.lastSeenAt != nil {
+        if remoteDevice.connectionState == DeviceConnectionState.connected.rawValue {
+            connectionState = .connected
+        } else if remoteDevice.connectionState == DeviceConnectionState.disconnected.rawValue {
+            connectionState = .disconnected
+        } else if existing?.connectionState == .connected {
             connectionState = .connected
         } else {
             connectionState = existing?.connectionState ?? .paired

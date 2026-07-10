@@ -4,9 +4,24 @@ import SwiftUI
 struct DeviceDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var viewModel: DeviceDetailViewModel
+    @State private var changeWiFiDevice: DeviceSummary?
+    private let startDeviceScanUseCase: StartDeviceScanUseCase
+    private let stopDeviceScanUseCase: StopDeviceScanUseCase
+    private let reconfigureDeviceWiFiUseCase: ReconfigureDeviceWiFiUseCase
+    private let wiFiProvisioningService: WiFiProvisioningServiceProtocol
 
-    init(viewModel: DeviceDetailViewModel) {
+    init(
+        viewModel: DeviceDetailViewModel,
+        startDeviceScanUseCase: StartDeviceScanUseCase,
+        stopDeviceScanUseCase: StopDeviceScanUseCase,
+        reconfigureDeviceWiFiUseCase: ReconfigureDeviceWiFiUseCase,
+        wiFiProvisioningService: WiFiProvisioningServiceProtocol
+    ) {
         _viewModel = State(initialValue: viewModel)
+        self.startDeviceScanUseCase = startDeviceScanUseCase
+        self.stopDeviceScanUseCase = stopDeviceScanUseCase
+        self.reconfigureDeviceWiFiUseCase = reconfigureDeviceWiFiUseCase
+        self.wiFiProvisioningService = wiFiProvisioningService
     }
 
     var body: some View {
@@ -34,6 +49,12 @@ struct DeviceDetailView: View {
                             }
                         }
                         .disabled(viewModel.draftName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || viewModel.draftName == device.name)
+                    }
+
+                    Section("Network") {
+                        Button("Change Wi-Fi") {
+                            changeWiFiDevice = device
+                        }
                     }
 
                     Section("Controls") {
@@ -72,6 +93,17 @@ struct DeviceDetailView: View {
         }
         .task {
             viewModel.startObserving()
+        }
+        .sheet(item: $changeWiFiDevice) { device in
+            ChangeDeviceWiFiView(
+                viewModel: ChangeDeviceWiFiViewModel(
+                    device: device,
+                    startDeviceScanUseCase: startDeviceScanUseCase,
+                    stopDeviceScanUseCase: stopDeviceScanUseCase,
+                    reconfigureDeviceWiFiUseCase: reconfigureDeviceWiFiUseCase,
+                    wiFiProvisioningService: wiFiProvisioningService
+                )
+            )
         }
         .alert("Device Error", isPresented: Binding(
             get: { viewModel.alertMessage != nil },
