@@ -17,9 +17,32 @@ function buildPayload(kind: DoseTransitionKind, medicineName: string, doseId: st
   return { ...copy[kind], data: { doseId, kind } };
 }
 
+// APNS tokens of every member of the given families, keyed by family id.
+async function tokensByFamily(familyIds: string[]): Promise<Map<string, string[]>> {
+  const userIdsByFamily = await familyRepository.getMemberUserIds(familyIds);
+  const allUserIds = [...new Set([...userIdsByFamily.values()].flat())];
+  const tokens = await pushTokenRepository.findByUserIds(allUserIds);
+
+  const tokensByUser = new Map<string, string[]>();
+  for (const t of tokens) {
+    const list = tokensByUser.get(t.userId) ?? [];
+    list.push(t.token);
+    tokensByUser.set(t.userId, list);
+  }
+
+  const byFamily = new Map<string, string[]>();
+  for (const [familyId, userIds] of userIdsByFamily) {
+    byFamily.set(
+      familyId,
+      userIds.flatMap((userId) => tokensByUser.get(userId) ?? [])
+    );
+  }
+  return byFamily;
+}
+
 export const notificationService = {
   // Fan a dose transition out to every family member (APNS) and the dispenser.
-  // Called once per dose per transition — the sweep only hands us rows that just
+  // Called once per dose per transition — callers only hand us rows that just
   // changed state, so there is no re-notify. ponytail: at-most-once — status is
   // already committed, so a crash here drops the push; upgrade to an outbox if
   // that loss becomes unacceptable for `missed` alerts.
@@ -30,23 +53,13 @@ export const notificationService = {
     const withMedicine = doses.filter((d) => d.medicine);
     if (withMedicine.length === 0) return;
 
-    const familyIds = [...new Set(withMedicine.map((d) => d.medicine!.familyId))];
-    const userIdsByFamily = await familyRepository.getMemberUserIds(familyIds);
-    const allUserIds = [...new Set([...userIdsByFamily.values()].flat())];
-    const tokens = await pushTokenRepository.findByUserIds(allUserIds);
-
-    const tokensByUser = new Map<string, string[]>();
-    for (const t of tokens) {
-      const list = tokensByUser.get(t.userId) ?? [];
-      list.push(t.token);
-      tokensByUser.set(t.userId, list);
-    }
+    const byFamily = await tokensByFamily([
+      ...new Set(withMedicine.map((d) => d.medicine!.familyId)),
+    ]);
 
     for (const dose of withMedicine) {
       const medicine = dose.medicine!;
-      const recipients = (userIdsByFamily.get(medicine.familyId) ?? []).flatMap(
-        (userId) => tokensByUser.get(userId) ?? []
-      );
+      const recipients = byFamily.get(medicine.familyId) ?? [];
       const payload = buildPayload(kind, medicine.name, dose.id);
 
       await Promise.all([
@@ -54,5 +67,19 @@ export const notificationService = {
         dispenserService.notify(medicine.deviceId, kind, dose.id),
       ]);
     }
+  },
+
+  // The box was opened with no dose window open — nothing was scheduled. Device-
+  // scoped, so there is no dose to dedupe against; the caller rate-limits this
+  // with the per-device notification cooldown.
+  async notifyBoxOpened(familyId: string, deviceId: string, deviceName: string): Promise<void> {
+    const recipients = (await tokensByFamily([familyId])).get(familyId) ?? [];
+    if (recipients.length === 0) return;
+
+    await apnsService.sendToTokens(recipients, {
+      title: "Pill box opened",
+      body: `${deviceName} was opened.`,
+      data: { deviceId, kind: "box_opened" },
+    });
   },
 };

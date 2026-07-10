@@ -6,12 +6,15 @@ import {
   UnauthorizedError,
 } from "../errors/AppError";
 import { deviceRepository } from "../repositories/device.repository";
+import { doseRepository } from "../repositories/dose.repository";
 import { familyRepository } from "../repositories/family.repository";
 import {
   DeviceConnectionState,
   DeviceConnectionType,
   DeviceEventType,
 } from "../types";
+import { shouldNotify } from "./notification-cooldown";
+import { notificationService } from "./notification.service";
 import { tokenService } from "./token.service";
 
 // Reed-switch bounce can fire multiple times per physical open; drop near-duplicates.
@@ -74,6 +77,38 @@ function normalizeRawPayload(raw?: string | null): object | null {
       : { value: parsed };
   } catch {
     return { raw };
+  }
+}
+
+// Push for a recorded `open`. Best-effort: the event row is already committed, so a
+// dead APNS must never fail the device's POST.
+//
+// `eventTime` is the device clock (correlation), `now` is the server clock (cooldown).
+// They are not interchangeable — a drifting RTC must not be able to bypass the cooldown.
+async function notifyOpen(device: Device, eventTime: Date, now: Date): Promise<void> {
+  try {
+    const { insideWindow, transitionedIds } = await doseRepository.correlateOpenEvent(
+      device.id,
+      eventTime,
+    );
+
+    // A dose transitions at most once, ever (the UPDATE is status-guarded), so this
+    // push cannot repeat. Deliberately not cooldown-gated: one open on a box holding
+    // two medicines with overlapping windows must send both confirmations.
+    if (transitionedIds.length > 0) {
+      await notificationService.notifyDoseTransition(transitionedIds, "needs_confirmation");
+      return;
+    }
+
+    // Opened inside a window, but nothing transitioned — the dose is already
+    // needs_confirmation (or taken/missed). Expected, and already notified. Silent.
+    if (insideWindow) return;
+
+    // Opened with nothing scheduled. No dose to dedupe against, so throttle by device.
+    if (!shouldNotify(`box_opened:${device.id}`, now.getTime())) return;
+    await notificationService.notifyBoxOpened(device.familyId, device.id, device.name);
+  } catch (err) {
+    console.error(`[device-event] notify failed for device ${device.id}:`, err);
   }
 }
 
@@ -237,8 +272,8 @@ export const deviceService = {
     return toPublicDevice(updated ?? device, new Date());
   },
 
-  // Ingests a reed-switch event from an ESP32: debounces, stores the raw event, and
-  // refreshes device liveness. Dose matching is intentionally not done here.
+  // Ingests a reed-switch event from an ESP32: debounces, stores the raw event,
+  // refreshes device liveness, then correlates an `open` to its dose window and pushes.
   async ingestDeviceEvent(
     authenticatedDeviceId: string,
     deviceId: string,
@@ -302,6 +337,11 @@ export const deviceService = {
         ? { firmwareVersion: data.firmwareVersion }
         : {}),
     });
+
+    // Correlate + push. `close` has no consumer yet.
+    if (eventType === "open") {
+      await notifyOpen(device, eventTime, now);
+    }
 
     return { status: "recorded" as const, event };
   },

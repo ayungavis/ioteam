@@ -94,8 +94,10 @@ export const doseRepository = {
 
   // pending|due -> needs_confirmation: the medicine's device reported an `open`
   // event inside the dose window (ambiguous — box opened, but taken? refill?).
-  // ponytail: this correlation belongs in ingestDeviceEvent (event-driven,
-  // instant) once that stub is built; here it is the polling backstop.
+  //
+  // `ingestDeviceEvent` now does this instantly via `correlateOpenEvent`; this is the
+  // polling backstop for events that landed while the push path was down. It cannot
+  // double-notify: the status guard below matches zero rows once ingest has run.
   async transitionNeedsConfirmation(now: Date): Promise<string[]> {
     const candidates = (await Dose.findAll({
       where: {
@@ -143,6 +145,55 @@ export const doseRepository = {
       }
     );
     return rows.map((r) => r.id);
+  },
+
+  // ─── Event-driven correlation (device event ingest) ─────────────────────────
+  // A single `open` event from one device, correlated against that device's dose
+  // windows. The instant path for what `transitionNeedsConfirmation` does on a timer.
+  //
+  // `insideWindow` separates "no dose scheduled right now" from "a dose is already
+  // awaiting confirmation" — the caller must not raise a box-opened alert for the
+  // latter. It is true whenever the event lands in any dose window, regardless of
+  // whether anything transitioned.
+  //
+  // ponytail: `at` is the device's clock, matching the sweep backstop. Both share
+  // the same clock-skew ceiling; move both to `server_received_at` together.
+  async correlateOpenEvent(
+    deviceId: string,
+    at: Date
+  ): Promise<{ insideWindow: boolean; transitionedIds: string[] }> {
+    const none = { insideWindow: false, transitionedIds: [] };
+
+    const medicines = await Medicine.findAll({
+      where: { deviceId },
+      attributes: ["id"],
+    });
+    if (medicines.length === 0) return none;
+
+    const inWindow = await Dose.findAll({
+      where: {
+        medicineId: { [Op.in]: medicines.map((m) => m.id) },
+        windowStartAt: { [Op.lte]: at },
+        windowEndAt: { [Op.gte]: at },
+      },
+      attributes: ["id", "status"],
+    });
+    if (inWindow.length === 0) return none;
+
+    const candidateIds = inWindow
+      .filter((d) => d.status === "pending" || d.status === "due")
+      .map((d) => d.id);
+    if (candidateIds.length === 0) return { insideWindow: true, transitionedIds: [] };
+
+    // Re-assert the status guard in the UPDATE: the sweep may have raced us here.
+    const [, rows] = await Dose.update(
+      { status: "needs_confirmation" },
+      {
+        where: { id: { [Op.in]: candidateIds }, status: { [Op.in]: ["pending", "due"] } },
+        returning: ["id"],
+      }
+    );
+    return { insideWindow: true, transitionedIds: rows.map((r) => r.id) };
   },
 
   // Doses joined to their medicine (family + device) — recipients for a notification.
