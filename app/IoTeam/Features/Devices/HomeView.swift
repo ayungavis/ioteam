@@ -110,7 +110,7 @@ struct HomeView: View {
             }
         }
         .sheet(isPresented: $isAddDevicePresented) {
-            makeConnectDeviceView()
+            makeConnectDeviceView().keyboardDismissal()
         }
         .alert("Device Error", isPresented: Binding(
             get: { viewModel.alertMessage != nil },

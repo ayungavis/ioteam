@@ -47,5 +47,6 @@ struct AppRootView: View {
             }
         }
         .environment(\.locale, localeManager.locale)
+        .keyboardDismissal()
     }
 }
