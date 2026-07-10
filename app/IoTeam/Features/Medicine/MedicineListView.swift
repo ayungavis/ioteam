@@ -52,7 +52,7 @@ struct MedicineListView: View {
         .onChange(of: isAddPresented) { _, newValue in
             if !newValue { Task { await viewModel.loadMedicines() } }
         }
-        .sheet(isPresented: $isAddPresented) { MedicineDetailView(mode: .add) }
+        .sheet(isPresented: $isAddPresented) { MedicineDetailView(mode: .add).keyboardDismissal() }
         .alert("Error", isPresented: Binding(get: { viewModel.alertMessage != nil }, set: { _ in viewModel.alertMessage = nil })) {
             Button("OK") {}
         } message: { Text(viewModel.alertMessage ?? "") }
