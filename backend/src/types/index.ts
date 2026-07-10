@@ -49,6 +49,9 @@ export type PushTokenPlatform = "ios";
 // Dose status changes the scheduler drives and notifies on.
 export type DoseTransitionKind = "due" | "missed" | "needs_confirmation";
 
+// Everything we push on. `box_opened` is device-scoped, not dose-scoped.
+export type NotificationKind = DoseTransitionKind | "box_opened";
+
 export interface NotificationPayload {
   title: string;
   body: string;
