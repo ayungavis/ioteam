@@ -7,11 +7,60 @@ import {
 } from "../errors/AppError";
 import { deviceRepository } from "../repositories/device.repository";
 import { familyRepository } from "../repositories/family.repository";
-import { DeviceConnectionType, DeviceEventType } from "../types";
+import {
+  DeviceConnectionState,
+  DeviceConnectionType,
+  DeviceEventType,
+} from "../types";
 import { tokenService } from "./token.service";
 
 // Reed-switch bounce can fire multiple times per physical open; drop near-duplicates.
 const DEBOUNCE_MS = 3000;
+export const DEVICE_ONLINE_GRACE_MS = 90_000;
+
+export type PublicDevice = {
+  id: string;
+  familyId: string;
+  name: string;
+  hardwareId: string;
+  connectionType: DeviceConnectionType;
+  status: string;
+  firmwareVersion: string | null;
+  lastSeenAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+  connectionState: DeviceConnectionState;
+};
+
+export function getDeviceConnectionState(
+  lastSeenAt: Date | null | undefined,
+  now: Date,
+): DeviceConnectionState {
+  if (!lastSeenAt) {
+    return "disconnected";
+  }
+
+  const ageMs = now.getTime() - lastSeenAt.getTime();
+  return ageMs >= 0 && ageMs <= DEVICE_ONLINE_GRACE_MS
+    ? "connected"
+    : "disconnected";
+}
+
+function toPublicDevice(device: Device, now: Date): PublicDevice {
+  return {
+    id: device.id,
+    familyId: device.familyId,
+    name: device.name,
+    hardwareId: device.hardwareId,
+    connectionType: device.connectionType,
+    status: device.status,
+    firmwareVersion: device.firmwareVersion ?? null,
+    lastSeenAt: device.lastSeenAt ?? null,
+    createdAt: device.createdAt,
+    updatedAt: device.updatedAt,
+    connectionState: getDeviceConnectionState(device.lastSeenAt, now),
+  };
+}
 
 // The device sends raw_payload as stringified JSON. Parse it into an object for
 // the JSONB column; if it isn't valid JSON, keep the original string so no data
@@ -47,7 +96,9 @@ async function assertDeviceInFamily(deviceId: string, familyId: string) {
 export const deviceService = {
   async listDevices(userId: string) {
     const membership = await assertFamilyMember(userId);
-    return deviceRepository.findByFamily(membership.familyId);
+    const devices = await deviceRepository.findByFamily(membership.familyId);
+    const now = new Date();
+    return devices.map((device) => toPublicDevice(device, now));
   },
 
   async generatePairingToken(userId: string) {
@@ -82,11 +133,16 @@ export const deviceService = {
     return sequelize.transaction(async (tx) => {
       const existing = await deviceRepository.findByHardwareId(data.hardwareId);
       if (existing) {
+        if (existing.familyId !== pairing.familyId) {
+          throw new ForbiddenError("Device is already registered to another family");
+        }
+
         deviceToken = await tokenService.generateDeviceToken(existing.id);
         device = await deviceRepository.update(
           existing.id,
           {
             name: data.name,
+            status: "active",
             deviceTokenHash: tokenService.hash(deviceToken),
           },
           tx,
@@ -120,7 +176,7 @@ export const deviceService = {
       }
 
       return {
-        device: device,
+        device: toPublicDevice(device, new Date()),
         deviceToken,
       };
     });
@@ -146,13 +202,39 @@ export const deviceService = {
       ...(data.status && { status: data.status }),
     });
 
-    return updated ?? device;
+    return toPublicDevice(updated ?? device, new Date());
   },
 
   async deleteDevice(userId: string, deviceId: string) {
     const membership = await assertFamilyMember(userId);
     await assertDeviceInFamily(deviceId, membership.familyId);
     await deviceRepository.softDelete(deviceId);
+  },
+
+  async recordHeartbeat(
+    authenticatedDeviceId: string,
+    deviceId: string,
+    data: { firmwareVersion?: string },
+  ) {
+    if (authenticatedDeviceId !== deviceId) {
+      throw new ForbiddenError(
+        "Device token does not match the requested device",
+      );
+    }
+
+    const device = await deviceRepository.findById(deviceId);
+    if (!device || device.status === "deleted") {
+      throw new NotFoundError("Device not found");
+    }
+
+    const updated = await deviceRepository.update(deviceId, {
+      lastSeenAt: new Date(),
+      ...(data.firmwareVersion
+        ? { firmwareVersion: data.firmwareVersion }
+        : {}),
+    });
+
+    return toPublicDevice(updated ?? device, new Date());
   },
 
   // Ingests a reed-switch event from an ESP32: debounces, stores the raw event, and

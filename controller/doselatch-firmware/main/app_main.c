@@ -52,8 +52,11 @@
 #define JSON_BUFFER_LENGTH 1024
 #define COMMAND_BUFFER_LENGTH 160
 #define EVENT_QUEUE_LENGTH 16
+#define PERSISTED_EVENT_QUEUE_LENGTH 64
+#define HEARTBEAT_INTERVAL_MS 30000
 #define REED_TASK_STACK_SIZE 4096
 #define UPLOAD_TASK_STACK_SIZE 8192
+#define HEARTBEAT_TASK_STACK_SIZE 8192
 #define CONSOLE_TASK_STACK_SIZE 4096
 #define REED_DEBOUNCE_US 500000
 
@@ -129,6 +132,7 @@ static bool s_current_is_open = true;
 static char s_last_error[ERROR_LENGTH] = {0};
 
 static SemaphoreHandle_t s_state_mutex;
+static SemaphoreHandle_t s_event_store_mutex;
 static QueueHandle_t s_event_queue;
 static EventGroupHandle_t s_wifi_events;
 static TaskHandle_t s_reed_task_handle;
@@ -419,12 +423,202 @@ finish:
     return ret;
 }
 
+static void event_key(char *buffer, size_t buffer_size, uint16_t index) {
+    snprintf(buffer, buffer_size, "ev_%02u", (unsigned int) index);
+}
+
+static esp_err_t storage_event_queue_count(uint16_t *count) {
+    if (count == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    xSemaphoreTake(s_event_store_mutex, portMAX_DELAY);
+    nvs_handle_t handle;
+    esp_err_t ret = nvs_open("doseevents", NVS_READONLY, &handle);
+    if (ret == ESP_ERR_NVS_NOT_FOUND) {
+        *count = 0;
+        ret = ESP_OK;
+        goto finish_without_handle;
+    }
+    ESP_GOTO_ON_ERROR(ret, finish_without_handle, TAG_STORAGE, "Failed to open event NVS");
+
+    ret = nvs_get_u16(handle, "count", count);
+    if (ret == ESP_ERR_NVS_NOT_FOUND) {
+        *count = 0;
+        ret = ESP_OK;
+    }
+
+    nvs_close(handle);
+finish_without_handle:
+    xSemaphoreGive(s_event_store_mutex);
+    return ret;
+}
+
+static esp_err_t storage_push_event(const device_event_t *event, bool *dropped_oldest) {
+    if (event == NULL || dropped_oldest == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    *dropped_oldest = false;
+    xSemaphoreTake(s_event_store_mutex, portMAX_DELAY);
+
+    nvs_handle_t handle;
+    esp_err_t ret = nvs_open("doseevents", NVS_READWRITE, &handle);
+    ESP_GOTO_ON_ERROR(ret, finish_without_handle, TAG_STORAGE, "Failed to open event NVS");
+
+    uint16_t head = 0;
+    uint16_t count = 0;
+    ret = nvs_get_u16(handle, "head", &head);
+    if (ret == ESP_ERR_NVS_NOT_FOUND) {
+        head = 0;
+        ret = ESP_OK;
+    }
+    ESP_GOTO_ON_ERROR(ret, finish, TAG_STORAGE, "Failed to load event head");
+
+    ret = nvs_get_u16(handle, "count", &count);
+    if (ret == ESP_ERR_NVS_NOT_FOUND) {
+        count = 0;
+        ret = ESP_OK;
+    }
+    ESP_GOTO_ON_ERROR(ret, finish, TAG_STORAGE, "Failed to load event count");
+
+    uint16_t write_index = (uint16_t) ((head + count) % PERSISTED_EVENT_QUEUE_LENGTH);
+    if (count >= PERSISTED_EVENT_QUEUE_LENGTH) {
+        write_index = head;
+        head = (uint16_t) ((head + 1) % PERSISTED_EVENT_QUEUE_LENGTH);
+        count = PERSISTED_EVENT_QUEUE_LENGTH;
+        *dropped_oldest = true;
+    } else {
+        count++;
+    }
+
+    char key[16] = {0};
+    event_key(key, sizeof(key), write_index);
+    ESP_GOTO_ON_ERROR(nvs_set_blob(handle, key, event, sizeof(*event)), finish, TAG_STORAGE, "Failed to save event");
+    ESP_GOTO_ON_ERROR(nvs_set_u16(handle, "head", head), finish, TAG_STORAGE, "Failed to save event head");
+    ESP_GOTO_ON_ERROR(nvs_set_u16(handle, "count", count), finish, TAG_STORAGE, "Failed to save event count");
+    ESP_GOTO_ON_ERROR(nvs_commit(handle), finish, TAG_STORAGE, "Failed to commit event queue");
+
+finish:
+    nvs_close(handle);
+finish_without_handle:
+    xSemaphoreGive(s_event_store_mutex);
+    return ret;
+}
+
+static esp_err_t storage_peek_event(device_event_t *event, bool *has_event) {
+    if (event == NULL || has_event == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    *has_event = false;
+    xSemaphoreTake(s_event_store_mutex, portMAX_DELAY);
+
+    nvs_handle_t handle;
+    esp_err_t ret = nvs_open("doseevents", NVS_READONLY, &handle);
+    if (ret == ESP_ERR_NVS_NOT_FOUND) {
+        ret = ESP_OK;
+        goto finish_without_handle;
+    }
+    ESP_GOTO_ON_ERROR(ret, finish_without_handle, TAG_STORAGE, "Failed to open event NVS");
+
+    uint16_t head = 0;
+    uint16_t count = 0;
+    ret = nvs_get_u16(handle, "head", &head);
+    if (ret == ESP_ERR_NVS_NOT_FOUND) {
+        ret = ESP_OK;
+        goto finish;
+    }
+    ESP_GOTO_ON_ERROR(ret, finish, TAG_STORAGE, "Failed to load event head");
+
+    ret = nvs_get_u16(handle, "count", &count);
+    if (ret == ESP_ERR_NVS_NOT_FOUND || count == 0) {
+        ret = ESP_OK;
+        goto finish;
+    }
+    ESP_GOTO_ON_ERROR(ret, finish, TAG_STORAGE, "Failed to load event count");
+
+    char key[16] = {0};
+    size_t event_size = sizeof(*event);
+    event_key(key, sizeof(key), head);
+    ESP_GOTO_ON_ERROR(nvs_get_blob(handle, key, event, &event_size), finish, TAG_STORAGE, "Failed to load event");
+    if (event_size != sizeof(*event)) {
+        ret = ESP_ERR_INVALID_SIZE;
+        goto finish;
+    }
+    *has_event = true;
+
+finish:
+    nvs_close(handle);
+finish_without_handle:
+    xSemaphoreGive(s_event_store_mutex);
+    return ret;
+}
+
+static esp_err_t storage_pop_event(void) {
+    xSemaphoreTake(s_event_store_mutex, portMAX_DELAY);
+
+    nvs_handle_t handle;
+    esp_err_t ret = nvs_open("doseevents", NVS_READWRITE, &handle);
+    if (ret == ESP_ERR_NVS_NOT_FOUND) {
+        ret = ESP_OK;
+        goto finish_without_handle;
+    }
+    ESP_GOTO_ON_ERROR(ret, finish_without_handle, TAG_STORAGE, "Failed to open event NVS");
+
+    uint16_t head = 0;
+    uint16_t count = 0;
+    ESP_GOTO_ON_ERROR(nvs_get_u16(handle, "head", &head), finish, TAG_STORAGE, "Failed to load event head");
+    ESP_GOTO_ON_ERROR(nvs_get_u16(handle, "count", &count), finish, TAG_STORAGE, "Failed to load event count");
+
+    if (count == 0) {
+        goto finish;
+    }
+
+    char key[16] = {0};
+    event_key(key, sizeof(key), head);
+    ESP_GOTO_ON_ERROR(nvs_erase_key(handle, key), finish, TAG_STORAGE, "Failed to erase event");
+
+    head = (uint16_t) ((head + 1) % PERSISTED_EVENT_QUEUE_LENGTH);
+    count--;
+    ESP_GOTO_ON_ERROR(nvs_set_u16(handle, "head", head), finish, TAG_STORAGE, "Failed to save event head");
+    ESP_GOTO_ON_ERROR(nvs_set_u16(handle, "count", count), finish, TAG_STORAGE, "Failed to save event count");
+    ESP_GOTO_ON_ERROR(nvs_commit(handle), finish, TAG_STORAGE, "Failed to commit event pop");
+
+finish:
+    nvs_close(handle);
+finish_without_handle:
+    xSemaphoreGive(s_event_store_mutex);
+    return ret;
+}
+
+static esp_err_t storage_clear_event_queue(void) {
+    xSemaphoreTake(s_event_store_mutex, portMAX_DELAY);
+
+    nvs_handle_t handle;
+    esp_err_t ret = nvs_open("doseevents", NVS_READWRITE, &handle);
+    if (ret == ESP_ERR_NVS_NOT_FOUND) {
+        ret = ESP_OK;
+        goto finish_without_handle;
+    }
+    ESP_GOTO_ON_ERROR(ret, finish_without_handle, TAG_STORAGE, "Failed to open event NVS");
+    ESP_GOTO_ON_ERROR(nvs_erase_all(handle), finish, TAG_STORAGE, "Failed to erase event NVS");
+    ESP_GOTO_ON_ERROR(nvs_commit(handle), finish, TAG_STORAGE, "Failed to commit event NVS erase");
+
+finish:
+    nvs_close(handle);
+finish_without_handle:
+    xSemaphoreGive(s_event_store_mutex);
+    return ret;
+}
+
 static esp_err_t storage_factory_reset(void) {
     nvs_handle_t handle;
     esp_err_t ret = nvs_open("doselatch", NVS_READWRITE, &handle);
     ESP_RETURN_ON_ERROR(ret, TAG_STORAGE, "Failed to open NVS for reset");
     ESP_GOTO_ON_ERROR(nvs_erase_all(handle), finish, TAG_STORAGE, "Failed to erase NVS");
     ESP_GOTO_ON_ERROR(nvs_commit(handle), finish, TAG_STORAGE, "Failed to commit reset");
+    ESP_GOTO_ON_ERROR(storage_clear_event_queue(), finish, TAG_STORAGE, "Failed to clear event queue");
 
 finish:
     nvs_close(handle);
@@ -568,13 +762,23 @@ static void notify_device_info(void) {
 }
 
 static void enqueue_device_event(device_event_t event) {
+    bool dropped_oldest = false;
+    esp_err_t error = storage_push_event(&event, &dropped_oldest);
+    if (error != ESP_OK) {
+        ESP_LOGE(TAG_QUEUE, "Failed to persist event err=0x%x", error);
+        return;
+    }
+    if (dropped_oldest) {
+        ESP_LOGW(TAG_QUEUE, "Persisted event queue full, dropped oldest event");
+    }
+
     if (xQueueSend(s_event_queue, &event, 0) == pdPASS) {
         return;
     }
 
     device_event_t dropped_event = {0};
     if (xQueueReceive(s_event_queue, &dropped_event, 0) == pdPASS) {
-        ESP_LOGW(TAG_QUEUE, "Event queue full, dropped oldest event");
+        ESP_LOGW(TAG_QUEUE, "Wake queue full, dropped oldest wake signal");
         xQueueSend(s_event_queue, &event, 0);
     }
 }
@@ -1039,12 +1243,11 @@ static esp_err_t http_post_json(
 
     ESP_LOGI(
         TAG_QUEUE,
-        "HTTP response status=%d contentLength=%d responseBytes=%d truncated=%s body=%s",
+        "HTTP response status=%d contentLength=%d responseBytes=%d truncated=%s",
         status_code,
         content_length,
         response_capture.bytes_written,
-        response_capture.truncated ? "true" : "false",
-        response_buffer != NULL ? response_buffer : ""
+        response_capture.truncated ? "true" : "false"
     );
     if (response_capture.truncated) {
         return ESP_ERR_INVALID_SIZE;
@@ -1074,7 +1277,7 @@ static esp_err_t register_device_with_backend(void) {
         s_config.device_id,
         s_config.device_name
     );
-    ESP_LOGI(TAG_QUEUE, "Backend register request payload=%s", payload);
+    ESP_LOGI(TAG_QUEUE, "Backend register request payloadBytes=%u", (unsigned int) strlen(payload));
 
     char response_buffer[JSON_BUFFER_LENGTH] = {0};
     int status_code = -1;
@@ -1088,7 +1291,6 @@ static esp_err_t register_device_with_backend(void) {
     }
     ESP_RETURN_ON_ERROR(error, TAG_QUEUE, "Failed to register device");
 
-    ESP_LOGI(TAG_QUEUE, "Backend register response payload=%s", response_buffer);
     cJSON *root = cJSON_Parse(response_buffer);
     if (root == NULL) {
         return ESP_FAIL;
@@ -1142,8 +1344,62 @@ static esp_err_t upload_event_to_backend(const device_event_t *event) {
         timestamp_buffer
     );
 
-    char response_buffer[JSON_BUFFER_LENGTH] = {0};
-    return http_post_json(url, s_config.device_token, payload, response_buffer, sizeof(response_buffer), NULL);
+    return http_post_json(url, s_config.device_token, payload, NULL, 0, NULL);
+}
+
+static esp_err_t post_heartbeat_to_backend(void) {
+    if (s_config.backend_device_id[0] == '\0' || s_config.device_token[0] == '\0') {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    char url[BACKEND_URL_LENGTH + 80] = {0};
+    char path[96] = {0};
+    snprintf(path, sizeof(path), "devices/%s/heartbeat", s_config.backend_device_id);
+    ESP_RETURN_ON_ERROR(build_url(url, sizeof(url), s_config.backend_base_url, path), TAG_QUEUE, "Failed to build heartbeat url");
+
+    char payload[64] = {0};
+    snprintf(payload, sizeof(payload), "{\"firmwareVersion\":\"0.2.0\"}");
+
+    int status_code = -1;
+    esp_err_t error = http_post_json(url, s_config.device_token, payload, NULL, 0, &status_code);
+    if (status_code == 401) {
+        set_last_error("Backend heartbeat unauthorized; re-pair device");
+        s_backend_registration_blocked = true;
+        notify_device_info();
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    return error;
+}
+
+static void heartbeat_task(void *argument) {
+    TickType_t last_wake = xTaskGetTickCount();
+    const TickType_t period = pdMS_TO_TICKS(HEARTBEAT_INTERVAL_MS);
+
+    for (;;) {
+        vTaskDelayUntil(&last_wake, period);
+
+        EventBits_t bits = xEventGroupGetBits(s_wifi_events);
+        if ((bits & WIFI_CONNECTED_BIT) == 0) {
+            continue;
+        }
+
+        if (strcmp(s_config.backend_mode, "http") != 0 || s_config.backend_base_url[0] == '\0') {
+            continue;
+        }
+
+        if (!s_config.paired || s_config.backend_device_id[0] == '\0' || s_config.device_token[0] == '\0') {
+            continue;
+        }
+
+        esp_err_t error = post_heartbeat_to_backend();
+        if (error != ESP_OK) {
+            ESP_LOGW(TAG_QUEUE, "Heartbeat failed err=0x%x", error);
+            continue;
+        }
+
+        ESP_LOGD(TAG_QUEUE, "Heartbeat completed stackHighWater=%u", (unsigned int) uxTaskGetStackHighWaterMark(NULL));
+    }
 }
 
 static void upload_task(void *argument) {
@@ -1188,29 +1444,42 @@ static void upload_task(void *argument) {
             continue;
         }
 
-        if (xQueueReceive(s_event_queue, &event, pdMS_TO_TICKS(1000)) != pdPASS) {
+        bool has_event = false;
+        esp_err_t storage_error = storage_peek_event(&event, &has_event);
+        if (storage_error != ESP_OK) {
+            ESP_LOGW(TAG_QUEUE, "Event queue read failed err=0x%x", storage_error);
+            vTaskDelay(pdMS_TO_TICKS(2000));
+            continue;
+        }
+
+        if (!has_event) {
+            xQueueReceive(s_event_queue, &event, pdMS_TO_TICKS(1000));
             continue;
         }
 
         if (strcmp(s_config.backend_mode, "http") == 0 && s_config.backend_base_url[0] != '\0') {
             esp_err_t upload_error = upload_event_to_backend(&event);
             if (upload_error != ESP_OK) {
-                enqueue_device_event(event);
                 ESP_LOGW(TAG_QUEUE, "Event upload failed err=0x%x", upload_error);
                 vTaskDelay(pdMS_TO_TICKS(2000));
                 continue;
             }
+            ESP_ERROR_CHECK_WITHOUT_ABORT(storage_pop_event());
         } else {
             ESP_LOGI(TAG_QUEUE, "Mock backend accepted event=%s", reed_state_label(event.is_open));
+            ESP_ERROR_CHECK_WITHOUT_ABORT(storage_pop_event());
         }
     }
 }
 
 static void print_status(void) {
     char info[JSON_BUFFER_LENGTH] = {0};
+    uint16_t persisted_count = 0;
+    ESP_ERROR_CHECK_WITHOUT_ABORT(storage_event_queue_count(&persisted_count));
     build_device_info_json(info, sizeof(info));
     printf("%s\n", info);
-    printf("queueDepth=%lu\n", (unsigned long) uxQueueMessagesWaiting(s_event_queue));
+    printf("wakeQueueDepth=%lu\n", (unsigned long) uxQueueMessagesWaiting(s_event_queue));
+    printf("persistedQueueDepth=%u\n", (unsigned int) persisted_count);
 }
 
 static void process_console_command(char *line) {
@@ -1245,7 +1514,10 @@ static void process_console_command(char *line) {
     }
 
     if (strcmp(command, "queue-dump") == 0) {
-        printf("queueDepth=%lu\n", (unsigned long) uxQueueMessagesWaiting(s_event_queue));
+        uint16_t persisted_count = 0;
+        ESP_ERROR_CHECK_WITHOUT_ABORT(storage_event_queue_count(&persisted_count));
+        printf("wakeQueueDepth=%lu\n", (unsigned long) uxQueueMessagesWaiting(s_event_queue));
+        printf("persistedQueueDepth=%u\n", (unsigned int) persisted_count);
         return;
     }
 
@@ -1339,8 +1611,13 @@ void app_main(void) {
     ESP_ERROR_CHECK(error);
 
     s_state_mutex = xSemaphoreCreateMutex();
+    s_event_store_mutex = xSemaphoreCreateMutex();
     s_event_queue = xQueueCreate(EVENT_QUEUE_LENGTH, sizeof(device_event_t));
     s_wifi_events = xEventGroupCreate();
+    ESP_ERROR_CHECK(s_state_mutex == NULL ? ESP_ERR_NO_MEM : ESP_OK);
+    ESP_ERROR_CHECK(s_event_store_mutex == NULL ? ESP_ERR_NO_MEM : ESP_OK);
+    ESP_ERROR_CHECK(s_event_queue == NULL ? ESP_ERR_NO_MEM : ESP_OK);
+    ESP_ERROR_CHECK(s_wifi_events == NULL ? ESP_ERR_NO_MEM : ESP_OK);
 
     ESP_ERROR_CHECK(storage_load_config());
     s_provisioning_state = s_config.paired ? PROVISIONING_STATE_PROVISIONED : PROVISIONING_STATE_UNPAIRED;
@@ -1357,5 +1634,6 @@ void app_main(void) {
     ble_init();
 
     xTaskCreate(upload_task, "upload_task", UPLOAD_TASK_STACK_SIZE, NULL, 8, NULL);
+    xTaskCreate(heartbeat_task, "heartbeat_task", HEARTBEAT_TASK_STACK_SIZE, NULL, 6, NULL);
     xTaskCreate(console_task, "console_task", CONSOLE_TASK_STACK_SIZE, NULL, 5, NULL);
 }

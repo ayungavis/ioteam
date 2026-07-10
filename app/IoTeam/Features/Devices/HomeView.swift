@@ -361,6 +361,14 @@ private struct PreviewDeviceRepository: DeviceRepositoryProtocol {
         throw BLEDeviceProvisioningError.deviceNotFound
     }
 
+    func reconfigureDeviceWiFi(
+        deviceID: UUID,
+        discoveryID: UUID,
+        provisioningInfo: DeviceProvisioningInfo
+    ) async throws -> DeviceSummary {
+        throw BLEDeviceProvisioningError.deviceNotFound
+    }
+
     func renameDevice(deviceID: UUID, newName: String) async throws -> DeviceSummary {
         throw BLEDeviceProvisioningError.deviceNotFound
     }

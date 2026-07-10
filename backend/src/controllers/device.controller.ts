@@ -73,6 +73,22 @@ export async function deleteDevice(
   res.json({ success: true });
 }
 
+// POST /devices/:id/heartbeat
+// Refreshes device liveness from the ESP32 without creating a reed event.
+export async function recordDeviceHeartbeat(
+  req: AuthenticatedRequest,
+  res: Response,
+): Promise<void> {
+  const { id } = req.params as { id: string };
+  const { firmwareVersion } = req.body as { firmwareVersion?: string };
+
+  const device = await deviceService.recordHeartbeat(req.deviceId ?? "", id, {
+    firmwareVersion,
+  });
+
+  res.json({ success: true, data: device });
+}
+
 // POST /devices/:id/events
 // Ingests a reed-switch open/close event from the ESP32.
 export async function ingestDeviceEvent(

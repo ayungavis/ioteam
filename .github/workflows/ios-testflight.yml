@@ -6,7 +6,8 @@ on:
   pull_request:
   push:
     branches:
-      - "**"
+      - main
+      - backend/steven
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

@@ -23,6 +23,7 @@ struct IoTeamApp: App {
     let joinFamilyUseCase: JoinFamilyUseCase
     let completeOnboardingUseCase: CompleteOnboardingUseCase
     let registerPushTokenUseCase: RegisterPushTokenUseCase
+    let unregisterPushTokenUseCase: UnregisterPushTokenUseCase
     let registerDeviceUseCase: RegisterDeviceUseCase
     let listFamilyDevicesUseCase: ListFamilyDevicesUseCase
     let getMedicinesUseCase: GetMedicinesUseCase
@@ -62,6 +63,7 @@ struct IoTeamApp: App {
             self.joinFamilyUseCase = JoinFamilyUseCase(client: networkClient)
             self.completeOnboardingUseCase = CompleteOnboardingUseCase(client: networkClient)
             self.registerPushTokenUseCase = RegisterPushTokenUseCase(client: networkClient)
+            self.unregisterPushTokenUseCase = UnregisterPushTokenUseCase(client: networkClient)
             self.registerDeviceUseCase = RegisterDeviceUseCase(client: networkClient)
             self.listFamilyDevicesUseCase = ListFamilyDevicesUseCase(client: networkClient)
             self.getMedicinesUseCase = GetMedicinesUseCase(client: networkClient)
@@ -92,7 +94,10 @@ struct IoTeamApp: App {
             if let accessToken = AppSessionStore.shared.currentSession?.accessToken {
                 URLSessionAPIClient.bootstrapSessionToken(accessToken)
             }
-            AppNotificationManager.shared.configure(registerPushTokenUseCase: registerPushTokenUseCase)
+            AppNotificationManager.shared.configure(
+                registerPushTokenUseCase: registerPushTokenUseCase,
+                unregisterPushTokenUseCase: unregisterPushTokenUseCase
+            )
 
             AppRouter.shared.currentFlow = AppLaunchCoordinator.shared.determineInitialFlow()
         } catch {
@@ -384,6 +389,14 @@ private final class FakeDeviceRepository: DeviceRepositoryProtocol {
     func stopScanning() {}
 
     func pairDevice(discoveryID: UUID, provisioningInfo: DeviceProvisioningInfo) async throws -> DeviceSummary {
+        throw BLEDeviceProvisioningError.deviceNotFound
+    }
+
+    func reconfigureDeviceWiFi(
+        deviceID: UUID,
+        discoveryID: UUID,
+        provisioningInfo: DeviceProvisioningInfo
+    ) async throws -> DeviceSummary {
         throw BLEDeviceProvisioningError.deviceNotFound
     }
 

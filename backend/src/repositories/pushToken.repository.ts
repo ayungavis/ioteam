@@ -13,4 +13,8 @@ export const pushTokenRepository = {
     if (userIds.length === 0) return Promise.resolve([]);
     return PushToken.findAll({ where: { userId: { [Op.in]: userIds } } });
   },
+
+  async deleteTokenForUser(userId: string, token: string): Promise<number> {
+    return PushToken.destroy({ where: { userId, token } });
+  },
 };

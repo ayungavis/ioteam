@@ -7,6 +7,7 @@ public protocol DeviceRepositoryProtocol {
     func startScanning() -> AsyncStream<DeviceScanSnapshot>
     func stopScanning()
     func pairDevice(discoveryID: UUID, provisioningInfo: DeviceProvisioningInfo) async throws -> DeviceSummary
+    func reconfigureDeviceWiFi(deviceID: UUID, discoveryID: UUID, provisioningInfo: DeviceProvisioningInfo) async throws -> DeviceSummary
     func renameDevice(deviceID: UUID, newName: String) async throws -> DeviceSummary
     func setDeviceEnabled(deviceID: UUID, isEnabled: Bool) async throws -> DeviceSummary
     func deleteDevice(deviceID: UUID) async throws

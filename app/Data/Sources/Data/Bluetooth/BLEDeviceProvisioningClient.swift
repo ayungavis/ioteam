@@ -140,6 +140,11 @@ private struct PairingSession {
     let continuation: CheckedContinuation<BLEDeviceInfoPayload, Error>
 }
 
+private struct DeviceInfoSession {
+    let peripheralID: UUID
+    let continuation: CheckedContinuation<BLEDeviceInfoPayload, Error>
+}
+
 private enum PairingTimeout {
     static let seconds: Duration = .seconds(15)
 }
@@ -160,6 +165,7 @@ public final class BLEDeviceProvisioningClient: NSObject, @unchecked Sendable, C
     private var stateWaiters: [CheckedContinuation<Void, Error>] = []
     private var characteristicMap: [UUID: [CBUUID: CBCharacteristic]] = [:]
     private var pairingSession: PairingSession?
+    private var deviceInfoSession: DeviceInfoSession?
     private var pendingInfoReads: [UUID: (Result<BLEDeviceInfoPayload, Error>) -> Void] = [:]
     private var pendingPairingDeviceInfo: BLEDeviceInfoPayload?
     private var awaitingPairingAcknowledgement = false
@@ -167,6 +173,7 @@ public final class BLEDeviceProvisioningClient: NSObject, @unchecked Sendable, C
     private var scanTimeoutTask: Task<Void, Never>?
     private var autoStopScanTask: Task<Void, Never>?
     private var pairingTimeoutTask: Task<Void, Never>?
+    private var deviceInfoTimeoutTask: Task<Void, Never>?
 
     private func log(_ message: String) {
         print("DoseLatch BLE \(message)")
@@ -242,10 +249,37 @@ public final class BLEDeviceProvisioningClient: NSObject, @unchecked Sendable, C
             )
             schedulePairingTimeout(for: id)
             log(
-                "pair started peripheral=\(id.uuidString) ssid=\(wifiSSID) deviceName=\(deviceName) "
+                "pair started peripheral=\(id.uuidString) deviceName=\(deviceName) "
                     + "backendMode=\(backendMode) backendBaseURLSet=\(backendBaseURL != nil)"
             )
-            centralManager.connect(peripheral)
+            if peripheral.state == .connected {
+                peripheral.delegate = self
+                peripheral.discoverServices([DoseLatchBLE.serviceUUID])
+            } else {
+                centralManager.connect(peripheral)
+            }
+        }
+    }
+
+    func readDeviceInfo(id: UUID) async throws -> BLEDeviceInfoPayload {
+        try await waitUntilPoweredOn()
+
+        guard let peripheral = discoveredPeripherals[id] else {
+            log("deviceInfo read aborted peripheral=\(id.uuidString) reason=deviceNotFound")
+            throw BLEDeviceProvisioningError.deviceNotFound
+        }
+
+        return try await withCheckedThrowingContinuation { continuation in
+            clearDeviceInfoState()
+            deviceInfoSession = DeviceInfoSession(peripheralID: id, continuation: continuation)
+            scheduleDeviceInfoTimeout(for: id)
+            log("deviceInfo session started peripheral=\(id.uuidString)")
+            if peripheral.state == .connected {
+                peripheral.delegate = self
+                peripheral.discoverServices([DoseLatchBLE.serviceUUID])
+            } else {
+                centralManager.connect(peripheral)
+            }
         }
     }
 
@@ -291,6 +325,38 @@ public final class BLEDeviceProvisioningClient: NSObject, @unchecked Sendable, C
         awaitingPairingAcknowledgement = false
         pairingSession = nil
         log("pair state cleared")
+    }
+
+    private func finishDeviceInfo(with result: Result<BLEDeviceInfoPayload, Error>) {
+        guard let session = deviceInfoSession else {
+            return
+        }
+
+        let peripheral = discoveredPeripherals[session.peripheralID]
+        clearDeviceInfoState()
+
+        if let peripheral, peripheral.state == .connected {
+            centralManager.cancelPeripheralConnection(peripheral)
+        }
+
+        switch result {
+        case .success(let payload):
+            session.continuation.resume(returning: payload)
+        case .failure(let error):
+            session.continuation.resume(throwing: error)
+        }
+    }
+
+    private func clearDeviceInfoState() {
+        deviceInfoTimeoutTask?.cancel()
+        deviceInfoTimeoutTask = nil
+
+        if let session = deviceInfoSession {
+            pendingInfoReads.removeValue(forKey: session.peripheralID)
+        }
+
+        deviceInfoSession = nil
+        log("deviceInfo state cleared")
     }
 
     private func finishPairingIfAcknowledged(by payload: BLEDeviceInfoPayload, peripheralID: UUID) {
@@ -350,6 +416,33 @@ public final class BLEDeviceProvisioningClient: NSObject, @unchecked Sendable, C
                             localized: "DoseLatch did not finish pairing in time.",
                             bundle: .module,
                             comment: "Shown when BLE provisioning stalls before the app can continue backend polling."
+                        )
+                    )
+                )
+            )
+        }
+    }
+
+    private func scheduleDeviceInfoTimeout(for peripheralID: UUID) {
+        deviceInfoTimeoutTask?.cancel()
+        deviceInfoTimeoutTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(8))
+
+            guard !Task.isCancelled,
+                  let session = deviceInfoSession,
+                  session.peripheralID == peripheralID
+            else {
+                return
+            }
+
+            log("deviceInfo read timed out peripheral=\(peripheralID.uuidString)")
+            finishDeviceInfo(
+                with: .failure(
+                    BLEDeviceProvisioningError.pairingFailed(
+                        String(
+                            localized: "DoseLatch did not respond in time.",
+                            bundle: .module,
+                            comment: "Shown when a BLE device-info read times out."
                         )
                     )
                 )
@@ -501,6 +594,11 @@ public final class BLEDeviceProvisioningClient: NSObject, @unchecked Sendable, C
 
     public func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
         log("connect failed peripheral=\(peripheral.identifier.uuidString) error=\(String(describing: error))")
+        if let session = deviceInfoSession, session.peripheralID == peripheral.identifier {
+            finishDeviceInfo(with: .failure(error ?? BLEDeviceProvisioningError.failedToConnect))
+            return
+        }
+
         finishPairing(with: .failure(error ?? BLEDeviceProvisioningError.failedToConnect))
     }
 
@@ -519,6 +617,22 @@ public final class BLEDeviceProvisioningClient: NSObject, @unchecked Sendable, C
                     )
                 )
             )
+        }
+
+        if let session = deviceInfoSession, session.peripheralID == peripheral.identifier {
+            characteristicMap.removeValue(forKey: peripheral.identifier)
+            finishDeviceInfo(
+                with: .failure(
+                    error ?? BLEDeviceProvisioningError.pairingFailed(
+                        String(
+                            localized: "DoseLatch disconnected before device verification completed.",
+                            bundle: .module,
+                            comment: "Shown when the BLE peripheral disconnects during device-info verification."
+                        )
+                    )
+                )
+            )
+            return
         }
 
         guard let session = pairingSession, session.peripheralID == peripheral.identifier else {
@@ -610,8 +724,7 @@ public final class BLEDeviceProvisioningClient: NSObject, @unchecked Sendable, C
                         self.log(
                             "pair command write requested peripheral=\(peripheral.identifier.uuidString) "
                                 + "bytes=\(commandPayload.count) backendMode=\(session.backendMode) "
-                                + "backendBaseURLSet=\(session.backendBaseURL != nil) "
-                                + "pairingToken=\(session.pairingToken)"
+                                + "backendBaseURLSet=\(session.backendBaseURL != nil)"
                         )
                         peripheral.writeValue(commandPayload, for: pairCharacteristic, type: .withResponse)
                     } catch {
@@ -622,6 +735,10 @@ public final class BLEDeviceProvisioningClient: NSObject, @unchecked Sendable, C
                     self.log("initial deviceInfo read failed error=\(error)")
                     self.finishPairing(with: .failure(error))
                 }
+            }
+        } else if let session = deviceInfoSession, session.peripheralID == peripheral.identifier {
+            readDeviceInfo(for: peripheral) { [weak self] result in
+                self?.finishDeviceInfo(with: result)
             }
         } else {
             log("no active pair session for peripheral=\(peripheral.identifier.uuidString); reading deviceInfo only")

@@ -59,16 +59,18 @@ public final class AppLaunchCoordinator {
 
     @MainActor
     func logout() {
-        AppSessionStore.shared.clear()
-        UserDefaults.standard.set(false, forKey: "userIsAuthenticated")
-        UserDefaults.standard.set(false, forKey: "hasCompletedProfileOnboarding")
-        UserDefaults.standard.set(false, forKey: "hasCompletedFamilySetup")
+        Task { @MainActor in
+            await AppNotificationManager.shared.unregisterCurrentTokenBeforeLogout()
 
-        Task {
-            // Clear runtime bearer headers out immediately to protect user privacy
+            AppSessionStore.shared.clear()
+            UserDefaults.standard.set(false, forKey: "userIsAuthenticated")
+            UserDefaults.standard.set(false, forKey: "hasCompletedProfileOnboarding")
+            UserDefaults.standard.set(false, forKey: "hasCompletedFamilySetup")
+
+            // Keep the bearer token until APNS cleanup finishes, then clear it.
             await URLSessionAPIClient.clearSessionToken()
-        }
 
-        AppRouter.shared.changeFlow(to: .authentication)
+            AppRouter.shared.changeFlow(to: .authentication)
+        }
     }
 }

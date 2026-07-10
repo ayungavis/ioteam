@@ -19,6 +19,22 @@ export async function registerPushToken(
   res.status(201).json({ success: true, data: { id: saved.id } });
 }
 
+// DELETE /notifications/tokens — unregister this device token for the current user.
+export async function unregisterPushToken(
+  req: AuthenticatedRequest,
+  res: Response
+): Promise<void> {
+  const { token } = req.body as { token?: string };
+
+  if (!token || typeof token !== "string") {
+    res.status(400).json({ success: false, error: "token is required" });
+    return;
+  }
+
+  await pushTokenRepository.deleteTokenForUser(req.userId, token);
+  res.json({ success: true });
+}
+
 export async function sendTestNotification(
   req: AuthenticatedRequest,
   res: Response

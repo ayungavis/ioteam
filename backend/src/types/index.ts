@@ -25,6 +25,8 @@ export type FrequencyType = "daily" | "weekly" | "hourly";
 
 export type DeviceStatus = "active" | "disabled" | "deleted";
 
+export type DeviceConnectionState = "connected" | "disconnected";
+
 export type MedicineStatus = "active" | "disabled" | "deleted";
 
 export type FamilyMemberRole = "owner" | "admin" | "member";

@@ -24,6 +24,7 @@ struct HomeTabCoordinatorView: View {
         let startDeviceScanUseCase = StartDeviceScanUseCase(repository: deviceRepository)
         let stopDeviceScanUseCase = StopDeviceScanUseCase(repository: deviceRepository)
         let pairDeviceUseCase = PairDeviceUseCase(repository: deviceRepository)
+        let reconfigureDeviceWiFiUseCase = ReconfigureDeviceWiFiUseCase(repository: deviceRepository)
         let renameDeviceUseCase = RenameDeviceUseCase(repository: deviceRepository)
         let setDeviceEnabledUseCase = SetDeviceEnabledUseCase(repository: deviceRepository)
         let deleteDeviceUseCase = DeleteDeviceUseCase(repository: deviceRepository)
@@ -69,7 +70,11 @@ struct HomeTabCoordinatorView: View {
                                     renameDeviceUseCase: renameDeviceUseCase,
                                     setDeviceEnabledUseCase: setDeviceEnabledUseCase,
                                     deleteDeviceUseCase: deleteDeviceUseCase
-                                )
+                                ),
+                                startDeviceScanUseCase: startDeviceScanUseCase,
+                                stopDeviceScanUseCase: stopDeviceScanUseCase,
+                                reconfigureDeviceWiFiUseCase: reconfigureDeviceWiFiUseCase,
+                                wiFiProvisioningService: wiFiProvisioningService
                             )
                         case .medicineDetail:
                             EmptyView()
